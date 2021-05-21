@@ -1,0 +1,321 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon May 17 17:56:34 2021
+
+@author: Manuel
+"""
+__author__ = "Manuel R. Popp"
+
+#### basic settings
+import platform, sys, datetime
+OS = platform.system()
+OS_version = platform.release()
+py_version = sys.version
+t_start = datetime.datetime.utcnow()
+print("Running on " + OS + " " + OS_version + ".\nPython version: " +
+      py_version + "\nUTC time (start): " + str(t_start) +
+      "\nLocal time (start): " + str(datetime.datetime.now()))
+
+### directories
+import os
+if OS == "Linux":
+    wd = "/home/manuel/Nextcloud/Masterarbeit"
+elif OS == "Windows":
+    wd = os.path.join("C:\\", "Users", "Manuel", "Nextcloud", "Masterarbeit")
+else:
+    raise Exception("OS not detected.")
+
+def dir_fig(fig_id = None):
+    if fig_id == None:
+        return os.path.join(wd, "fig")
+    else:
+        return os.path.join(wd, "fig", fig_id)
+
+def dir_dat(dat_id = None):
+    if dat_id == None:
+        return os.path.join(wd, "dat")
+    else:
+        return os.path.join(wd, "dat", dat_id)
+
+def dir_out(out_id = None):
+    if out_id == None:
+        return os.path.join(wd, "out")
+    else:
+        return os.path.join(wd, "out", out_id)
+
+os.chdir(wd)
+
+#### generate tiles and masks
+import pathlib
+def dir_omk(plot_id = None, year = None):
+    if plot_id == None:
+        if year == None:
+            return dir_dat("omk")
+        else:
+            return os.path.join(dir_dat("omk"), year)
+    else:
+        if year == None:
+            return list(pathlib.Path(dir_dat("omk")) \
+                        .glob("**/*" + plot_id + "*"))[0]
+        else:
+            return list(pathlib.Path(os.path.join(dir_dat("omk"), year)) \
+                        .glob("**/*" + plot_id + "*"))[0]
+
+def dir_tls(plot_id = None, myear = None, dset = None):
+    if plot_id == None:
+        if myear == None:
+            if dset == None:
+                return dir_dat("tls")
+            else:
+                return dir_dat("tls")
+                raise Exception("Missing year. Returning tile directory.")
+        else:
+            if dset == None:
+                return os.path.join(dir_dat("tls"), myear)
+            else:
+                return os.path.join(dir_dat("tls"), myear, dset)
+    else:
+        if myear == None:
+            return dir_dat("tls")
+            raise Exception("Missing year. Returning tile directory.")
+        else:
+            if dset == None:
+                return os.path.join(dir_dat("tls"), myear)
+                raise Exception("Missing dset (X or y). Returning tile directory.")
+            else:
+                return os.path.join(dir_dat("tls"), myear, dset, plot_id)
+
+### select plots to use
+use_plots = ["B3_4"]
+year = "03_2021"
+no_data_class = True
+
+#### AcrGIS Online log-in
+if not os.path.exists(os.path.join(wd, "gis", "pw.txt")):
+    from cryptography.fernet import Fernet
+    import urllib
+    url = "https://www.dropbox.com/s/vcuezzq01drsx9m/enc.txt?dl=1"
+    file = urllib.request.urlopen(url)
+    for line in file:
+        l = line.decode("utf-8")
+        b = bytes(l, "utf-8")
+        key = None
+        fernet = Fernet(key)
+    login = eval(fernet.decrypt(b).decode())
+    enc = fernet.encrypt(str(login).encode())
+else:
+    login = open(os.path.join(wd, "gis", "pw.txt"), "r").readlines()
+if key == None:
+    raise Exception("No key provided. Please ask for permission: manuel[at]cdpopp.de")
+import arcgis
+from arcgis.gis import GIS
+gis = GIS(None, login[0].rstrip(), login[1], verify_cert = False)
+def dir_shp(plot_id = None):
+    if not os.path.exists(dir_dat("shp")):
+        os.makedirs(dir_dat("shp"))
+    if plot_id == None:
+        return dir_dat("shp")
+    else:
+        return os.path.join(dir_dat("shp"), (plot_id))
+del login
+
+def downloadShapefiles(plot_id, path):
+    try:
+        # Search items by username
+        cont = gis.content.search("owner:{0}".format("manuel.popp_KIT"))
+        for shp in cont:
+            if plot_id in shp.title:
+                shapefile = shp.export("layer {}".format(shp.type), "Shapefile")
+                shapefile.download(path)
+                shapefile.delete()
+    except Exception as e:
+        print(e)
+
+### get data and create masks and tiles
+imgr = 128
+imgc = 128
+imgdim = 3
+import numpy as np
+from osgeo import gdal, ogr, osr
+from osgeo.gdal_array import CopyDatasetInfo, BandReadAsArray
+def blacken(data, mask, NoDataVal, outFile = "/vsimem/Blackened.tif"):
+    dat = gdal.Open(data, gdal.GA_ReadOnly)
+    msk = gdal.Open(mask, gdal.GA_ReadOnly)
+    bm = msk.GetRasterBand(1)
+    am = BandReadAsArray(bm)
+    null = np.where(am == NoDataVal)
+    am = None
+    bm = None
+    msk = None
+    drv = gdal.GetDriverByName("GTiff")
+    new = drv.Create(outFile, dat.RasterXSize, dat.RasterYSize,
+                     dat.RasterCount, dat.GetRasterBand(1).DataType)
+    CopyDatasetInfo(dat, new)
+    for b in range(dat.RasterCount):
+        band = dat.GetRasterBand(b+1)
+        a = BandReadAsArray(band)
+        a[null] = 0
+        new.GetRasterBand(b+1).WriteArray(a)
+        #new.GetRasterBand(b).SetNoDataValue(NoDataVal)
+        a = None
+    new.FlushCache()
+    dat = None
+    return new
+
+from matplotlib import pyplot as plt
+for plot in use_plots:
+    # download shapefile containing the segments
+    if not os.path.exists(dir_shp(plot)):
+        downloadShapefiles(plot_id = plot,
+                           path = dir_shp(plot))
+    
+    if len(list(pathlib.Path(dir_shp(plot)).glob("**/*.shp"))) < 1:
+        import zipfile as zf
+        tmp = zf.ZipFile(
+            list(pathlib.Path(dir_shp(plot)).glob("**/*.zip"))[0],
+                         mode = "r")
+        tmp.extractall(path = dir_shp(plot))
+        tmp.close()
+        os.remove(list(pathlib.Path(dir_shp(plot)).glob("**/*.zip"))[0])
+    # check if mask was created
+    if len(list(pathlib.Path(dir_omk(plot)).glob("**/*_mask.tif"))) < 1:
+        # open orthomosaic
+        t = os.path.join(dir_omk(plot))
+        tif = gdal.Open(t)
+        drv = ogr.GetDriverByName("ESRI Shapefile")
+        # check if shapefile projection was adapted
+        plib = pathlib.Path(dir_shp(plot))
+        if len(list(pathlib.Path(dir_shp(plot)).glob("**/*_UTM.shp"))) < 1:
+            # open shapefile
+            s = os.path.join(list(plib.glob("**/*.shp"))[0])
+            sUTM = s[:len(s)-4] + "_UTM.shp"
+            #import geopandas
+            #shp = geopandas.read_file(s)
+            #shp.to_crs(crs1)
+            shp = drv.Open(s)
+            layer = shp.GetLayer()
+            crs0 = layer.GetSpatialRef()
+            crs1 = tif.GetSpatialRef()#.GetProjection()
+            # transform to similar crs
+            coordTrans = osr.CoordinateTransformation(crs0, crs1)
+            # create output shapefile
+            outSHP = drv.CreateDataSource(sUTM)
+            outLayer = outSHP.CreateLayer(sUTM,
+                                          geom_type = ogr.wkbMultiPolygon)
+            lyrdef = layer.GetLayerDefn()
+            for i in range(0, lyrdef.GetFieldCount()):
+                fieldDefn = lyrdef.GetFieldDefn(i)
+                outLayer.CreateField(fieldDefn)
+            outdef = outLayer.GetLayerDefn()
+            
+            inFeature = layer.GetNextFeature()
+            while inFeature:
+                geom = inFeature.GetGeometryRef()
+                geom.Transform(coordTrans)
+                outFeature = ogr.Feature(outdef)
+                outFeature.SetGeometry(geom)
+                for i in range(0, outdef.GetFieldCount()):
+                    outFeature.SetField(outdef.GetFieldDefn(i).GetNameRef(),
+                                        inFeature.GetField(i))
+                outLayer.CreateFeature(outFeature)
+                outFeature = None
+                inFeature = layer.GetNextFeature()
+            inFeature = None
+            layer = None
+            shp = None
+            outSHP = None
+            shp = drv.Open(sUTM)
+        else:
+            sUTM = os.path.join(list(plib.glob("**/*_UTM.shp"))[0])
+            shp = drv.Open(sUTM)
+        # create mask
+        layer = shp.GetLayer()
+        x_min, x_max, y_min, y_max = (sys.maxsize, 0, sys.maxsize, 0)
+        feature = layer.GetNextFeature()
+        while feature:
+            geom = feature.GetGeometryRef()
+            extent = geom.GetEnvelope()
+            x_min = min(x_min, extent[0])
+            x_max = max(x_max, extent[1])
+            y_min = min(y_min, extent[2])
+            y_max = max(y_max, extent[3])
+            feature = layer.GetNextFeature()
+        feature = None
+        extent = (x_min, x_max, y_min, y_max)
+        t_crop = t[:len(t)-4] + "_CROP.tif"
+        tif_crop = gdal.Warp(t_crop, tif,
+                             outputBounds = (x_min, y_min, x_max, y_max))
+        tif_crop.SetProjection(tif.GetProjection())
+        tif = None
+        tif_crop = None
+        from osgeo import gdalconst
+        tif_crop = gdal.Open(t_crop, gdalconst.GA_ReadOnly)#r"/vsimem/clip.tif"
+        m = t[:len(t)-4] + "_mask.tif"
+        x_res = tif_crop.RasterXSize
+        y_res = tif_crop.RasterYSize
+        geo_tf = tif_crop.GetGeoTransform()
+        pxw = geo_tf[1]
+        mask = gdal.GetDriverByName("GTiff") \
+            .Create(m, x_res, y_res, 1, gdal.GDT_Byte)
+        mask.SetGeoTransform((x_min, pxw, 0, y_min, 0, pxw))
+        mask.SetProjection(tif_crop.GetProjection())
+        CopyDatasetInfo(tif_crop, mask)
+        band = mask.GetRasterBand(1)
+        NoDataValue = 100
+        band.Fill(NoDataValue)
+        gdal.RasterizeLayer(mask, [1], layer, options = ["ATTRIBUTE=Species"])
+        #band.SetNoDataValue(NoDataValue)
+        band.FlushCache()
+        band = None
+        mask = None
+        layer = None
+        shp = None
+    else:
+        t = os.path.join(dir_omk(plot))
+        t_crop = t[:len(t)-4] + "_CROP.tif"
+        m = t[:len(t)-4] + "_mask.tif"
+    # check if training tiles were generated
+    if len(list(pathlib.Path(dir_tls(plot_id = plot, myear = year)) \
+                .glob("**/*_y.tif"))) < 1:
+        ### create tiles
+        # blacken pixels not assigned to any class
+        if no_data_class:
+            tif = blacken(data = t_crop, mask = m, NoDataVal = NoDataValue)
+        else:
+            tif = gdal.Open(t_crop)
+        mask = gdal.Open(m)
+        r = mask.RasterYSize
+        c = mask.RasterXSize
+        geo_tf = mask.GetGeoTransform()
+        xmin = geo_tf[0]
+        ymax = geo_tf[3]
+        res = geo_tf[1]
+        ytiles = int(r/imgr)
+        xtiles = int(c/imgc)
+        ypx = ytiles*int(imgr)
+        xpx = xtiles*int(imgc)
+        # walk North, since we're in the southern hemisphere
+        ycrds = [ymax - res*imgr*m for m in range(ytiles+1)]
+        xcrds = [xmin + res*imgc*n for n in range(xtiles+1)]
+        if not os.path.exists(dir_tls(myear = year, dset = "X")):
+            os.makedirs(dir_tls(myear = year, dset = "X"))
+        if not os.path.exists(dir_tls(myear = year, dset = "y")):
+            os.makedirs(dir_tls(myear = year, dset = "y"))
+        counter = 0
+        for i in range(ytiles):
+            for j in range(xtiles):
+                ymin = ycrds[i+1]
+                ymax = ycrds[i]
+                xmin = xcrds[j]
+                xmax = xcrds[j+1]
+                x = str(counter).zfill(8)
+                fntif = dir_tls(plot_id = plot,
+                                myear = year, dset = "X") + x + "_X.tif"
+                fnmsk = dir_tls(plot_id = plot,
+                                myear = year, dset = "y") + x + "_y.tif"
+                gdal.Warp(fntif, tif, outputBounds = (xmin, ymin, xmax, ymax))
+                gdal.Warp(fnmsk, mask, outputBounds = (xmin, ymin, xmax, ymax))
+                counter = counter + 1
+        tif = None
+        mask = None
