@@ -1,0 +1,9 @@
+arcgis==1.8.5.post3
+cryptography==3.4.7
+keras_unet_collection==0.0.18
+pandas==1.2.4
+matplotlib==3.4.2
+numpy==1.20.3
+osgeo==0.0.0
+tabulate==0.8.9
+tensorflow==2.5.0rc3
