@@ -21,34 +21,31 @@ Pull requests are the best way to propose changes to the codebase (we use [Githu
 6. Issue that pull request!
 
 ## Any contributions you make will be under the MIT Software License
-In short, when you submit code changes, your submissions are understood to be under the same [MIT License](http://choosealicense.com/licenses/mit/) that covers the project. Feel free to contact the maintainers if that's a concern.
+In short, when you submit code changes, your submissions are understood to be under the same [Unlicense](https://unlicense.org/) that covers the project. Feel free to contact the maintainers if that's a concern.
 
-## Report bugs using Github's [issues](https://github.com/briandk/transcriptase-atom/issues)
+## Report bugs using Github's [issues](https://github.com/ManuelPopp/LeleNet/issues)
 We use GitHub issues to track public bugs. Report a bug by [opening a new issue](); it's that easy!
 
 ## Write bug reports with detail, background, and sample code
-[This is an example](http://stackoverflow.com/q/12488905/180626) of a bug report I wrote, and I think it's not a bad model. Here's [another example from Craig Hockenberry](http://www.openradar.me/11905408), an app developer whom I greatly respect.
+[This is a template](https://gist.github.com/carlo/3402842) for a bug report I you can use in case you are not sure about how a bug report should be structured. Give a MWE, if you can/if suitable. Screenshots and other images can be helpful, especially if the issue is related to image data. However, please refrain from attaching code or other text as images.
 
 **Great Bug Reports** tend to have:
 
 - A quick summary and/or background
 - Steps to reproduce
   - Be specific!
-  - Give sample code if you can. [My stackoverflow question](http://stackoverflow.com/q/12488905/180626) includes sample code that *anyone* with a base R setup can run to reproduce what I was seeing
-- What you expected would happen
-- What actually happens
-- Notes (possibly including why you think this might be happening, or stuff you tried that didn't work)
+  - Give sample code if you can.
+- A description of the expected outcome
+- A detailled description of the actual outcome (including complete error messages)
+- Notes (possibly including why you think this might be happening, or descriptions of what you already tried and how it went out)
 
 People *love* thorough bug reports. I'm not even kidding.
 
 ## Use a Consistent Coding Style
-I'm again borrowing these from [Facebook's Guidelines](https://github.com/facebook/draft-js/blob/a9316a723f9e918afde44dea68b5f9f39b7d9b00/CONTRIBUTING.md)
-
-* 2 spaces for indentation rather than tabs
 * You can try running `npm run lint` for style unification
 
 ## License
-By contributing, you agree that your contributions will be licensed under its MIT License.
+By contributing, you agree that your contributions will be licensed under its Unlicense License.
 
 ## References
-This document was adapted from the open-source contribution guidelines for [Facebook's Draft](https://github.com/facebook/draft-js/blob/a9316a723f9e918afde44dea68b5f9f39b7d9b00/CONTRIBUTING.md) and shared on Github: https://gist.github.com/briandk/3d2e8b3ec8daf5a27a62
+This document was adapted from https://gist.github.com/briandk/3d2e8b3ec8daf5a27a62
