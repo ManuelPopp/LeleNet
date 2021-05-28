@@ -48,6 +48,24 @@ def dir_shp(plot_id = None, myear = None):
             return(os.path.join(dir_dat("shp"), myear, plot_id))
 del login
 
+import arcgis
+from arcgis.gis import GIS
+gis = GIS(None, login[0].rstrip(), login[1], verify_cert = False)
+def dir_shp(plot_id = None, myear = None):
+    if myear == None:
+        if plot_id == None:
+            return(dir_dat("shp"))
+        else:
+            print("Option myear missing but required.")
+    else:
+        if plot_id == None:
+            return(os.path.join(dir_dat("shp"), myear))
+        else:
+            os.makedirs(os.path.join(dir_dat("shp"), myear, plot_id),
+                        exist_ok = True)
+            return(os.path.join(dir_dat("shp"), myear, plot_id))
+del login
+
 def downloadShapefiles(plot_id, path, dateTime = None):
     try:
         # Search items by username
@@ -219,21 +237,21 @@ for plot in use_plots:
         if os.path.exists(t):
             # open orthomosaic
             tif = gdal.Open(t)
-            crs1 = tif.GetSpatialRef()#.GetProjection()
+            crs1 = tif.GetProjectionRef()#GetSpatialRef()#.GetProjection()
             tif = None
-            # open shapefile
+            # reproject shapefile
             s = os.path.join(list(plib.glob("**/*.shp"))[0])
             sUTM = s[:len(s)-4] + "_UTM.shp"
-            '''
-            Open shp input, set destination crs output to
-            raster crs and write to output shp name
-            '''
+            drv = ogr.GetDriverByName("ESRI Shapefile")
+            if os.path.exists(sUTM):
+                drv.DeleteDataSource(sUTM)
             srcDS = gdal.OpenEx(s)
-            ds = gdal.VectorTranslate(sUTM, srcDS, format = "ESRI Shapefile", dstSRS = crs1, reproject = True)
+            ds = gdal.VectorTranslate(sUTM, srcDS, format = "ESRI Shapefile",
+                                      dstSRS = crs1, reproject = True)
             ds = None
             srcDS = None
-            # Write prj
-            with open(f"{os.path.splitext(sUTM)[0]}.prj", 'w') as f:
+            # write .prj file
+            with open(f"{os.path.splitext(sUTM)[0]}.prj", "w") as f:
                 f.write(crs1)
         else:
             raise Exception("Raster is missing (for layout reference): " + t)
@@ -393,6 +411,7 @@ for SET in ["tst", "val"]:
         if not N_totX == N_toty:
             raise Exception("Number of X tiles does not match y tiles.")
         else:
+            N_tot = N_totX
             N_set = int(round(N_tot*globals()[SET + "_share"]))
             del N_totX, N_toty
         import random
