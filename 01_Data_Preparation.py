@@ -221,42 +221,20 @@ for plot in use_plots:
             tif = gdal.Open(t)
             crs1 = tif.GetSpatialRef()#.GetProjection()
             tif = None
-            drv = ogr.GetDriverByName("ESRI Shapefile")
             # open shapefile
             s = os.path.join(list(plib.glob("**/*.shp"))[0])
             sUTM = s[:len(s)-4] + "_UTM.shp"
-            LayerName = pathlib.Path(s).name
-            if os.path.exists(sUTM):
-                drv.DeleteDataSource(sUTM)
-            shp = drv.Open(s)
-            layer = shp.GetLayer()
-            crs0 = layer.GetSpatialRef()
-            # transform to similar crs
-            coordTrans = osr.CoordinateTransformation(crs0, crs1)
-            # create output shapefile
-            outSHP = drv.CreateDataSource(sUTM)
-            outLayer = outSHP.CreateLayer(LayerName[:len(LayerName)-4],
-                                          geom_type = ogr.wkbMultiPolygon)
-            lyrdef = layer.GetLayerDefn()
-            for i in range(0, lyrdef.GetFieldCount()):
-                fieldDefn = lyrdef.GetFieldDefn(i)
-                outLayer.CreateField(fieldDefn)
-            outdef = outLayer.GetLayerDefn()
-            feature = layer.GetNextFeature()
-            while feature:
-                geom = feature.GetGeometryRef()
-                geom.Transform(coordTrans)
-                outFeature = ogr.Feature(outdef)
-                outFeature.SetGeometry(geom)
-                for i in range(0, outdef.GetFieldCount()):
-                    outFeature.SetField(outdef.GetFieldDefn(i).GetNameRef(),
-                                        feature.GetField(i))
-                outLayer.CreateFeature(outFeature)
-                outFeature = None
-                feature = layer.GetNextFeature()
-            layer = None
-            shp = None
-            outSHP = None
+            '''
+            Open shp input, set destination crs output to
+            raster crs and write to output shp name
+            '''
+            srcDS = gdal.OpenEx(s)
+            ds = gdal.VectorTranslate(sUTM, srcDS, format = "ESRI Shapefile", dstSRS = crs1, reproject = True)
+            ds = None
+            srcDS = None
+            # Write prj
+            with open(f"{os.path.splitext(sUTM)[0]}.prj", 'w') as f:
+                f.write(crs1)
         else:
             raise Exception("Raster is missing (for layout reference): " + t)
     if check_version(file = dir_omk(plot, type_ext = "_MASK"),
