@@ -127,3 +127,39 @@ def FCDense(n_classes, input_shape = (imgr, imgc, imgdim),
     print(model.summary())
     print(f'Total number of layers: {len(model.layers)}')
     return model
+
+# Get model
+model = FCDense(n_classes = N_CLASSES)
+
+# Using some simple built-in learning rate decay:
+lr_sched = ks.optimizers.schedules.ExponentialDecay(
+    initial_learning_rate = 1e-3,
+    # decay after n steps
+    decay_steps = np.floor(N_img/bs),
+    decay_rate = 0.995)
+optimizer = ks.optimizers.RMSprop(learning_rate = lr_sched)# FC-DenseNet Optim.
+
+# list callbacks
+logdir = os.path.join(dir_out("logs"), datetime.datetime.now() \
+                      .strftime("%y-%m-%d-%H-%M-%S"))
+os.makedirs(logdir)
+os.chdir(logdir)
+cllbs = [
+    ks.callbacks.EarlyStopping(patience = 8),
+    ks.callbacks.ModelCheckpoint(dir_out("Checkpoint.h5"),
+                                 save_best_only = True),
+    ks.callbacks.TensorBoard(log_dir = logdir)
+    ]
+# compile model
+model.compile(optimizer = optimizer, loss = "sparse_categorical_crossentropy",
+              metrics = ["accuracy"])
+model.summary()
+
+model.fit(train_generator, epochs = 45, steps_per_epoch = np.ceil(N_img/bs),
+                 validation_data = val_generator,
+                 validation_steps = np.ceil(N_val/bs),
+                 callbacks = cllbs)
+os.chdir(dir_out())
+# save model
+os.makedirs(dir_out("mod_FCD"), exist_ok = True)
+model.save(dir_out("mod_FCD"))
