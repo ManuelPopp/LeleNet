@@ -9,11 +9,11 @@ in the following paper https://www.doi.org/10.1007/978-3-319-24574-4_28
 in tf.Keras.
 """
 
-def UNet(n_classes, input_shape = (imgr, imgc, imgdim), dropout_rate = 0.1,
+def UNet(n_classes, input_shape = (imgr, imgc, imgdim), dropout = 0.5,
          ops = {"activation" : "relu",
                    "padding" : "same",
                    "kernel_initializer" : "he_normal"
-        }, dropout = 0.5):
+        }):
     # Common settings for Conv2D layers
     
     # Input layer
