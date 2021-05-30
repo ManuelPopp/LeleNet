@@ -3,6 +3,10 @@
 Created on Sat May 29 23:36:08 2021
 
 @author: Manuel
+
+Implementation of the U-Net structure proposed by Ronneberger et al. (2015)
+in the following paper https://www.doi.org/10.1007/978-3-319-24574-4_28
+in tf.Keras.
 """
 
 def UNet(n_classes, input_shape = (imgr, imgc, imgdim), dropout_rate = 0.1,
