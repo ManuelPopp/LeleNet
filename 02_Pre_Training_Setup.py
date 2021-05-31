@@ -10,14 +10,13 @@ __author__ = "Manuel R. Popp"
 
 os.chdir(wd)
 
-classes, classes_decoded, NoDataValue = get_var("ClassIDs")
-#### semantic segmentation
+# semantic segmentation
 import tensorflow as tf
 from tensorflow import keras as ks
 tf.__version__
 ks.__version__
 
-### make GPU available
+## make GPU available
 phys_devs = tf.config.experimental.list_physical_devices("GPU")
 print("N GPUs available: ", len(phys_devs))
 if len(phys_devs) >= 1 and False:
@@ -25,7 +24,7 @@ if len(phys_devs) >= 1 and False:
 else:
     os.environ['CUDA_VISIBLE_DEVICES'] = "-1"
 
-### build data generators
+## build data generators
 N_img = len(list(pathlib.Path(dir_tls(myear = year, dset = "X")) \
                  .glob("**/*.tif")))
 N_val = len(list(pathlib.Path(dir_tls(myear = year, dset = "X_val")) \
@@ -37,20 +36,20 @@ args_col = {"data_format" : "channels_last",
             "brightness_range" : [0.5, 1.5]
             }
 args_aug = {"rotation_range" : 365,
-            "width_shift_range" : 0.2,
-            "height_shift_range" : 0.2,
-            "horizontal_flip" : True,
+            "width_shift_range" : 0.25,
+            "height_shift_range" : 0.25,
+            "horizontal_flip" : True,### set to False when training with images that have a top and bottom!
             "vertical_flip" : True,
-            "fill_mode" : "constant",
-           # "featurewise_std_normalization" : False,
             "featurewise_center" : False
             }
+args_aug["fill_mode"] =  "constant" if no_data_class == True else "reflect"
+
 args_flow = {"class_mode" : None,
              "batch_size" : bs,
              "target_size" : (imgr, imgc),
              "seed" : zeed
              }
-
+### training data generator
 X_generator = ks.preprocessing.image.ImageDataGenerator(rescale = 1.0/255.0,
                                                         **args_aug,
                                                         **args_col)
@@ -60,8 +59,9 @@ X_gen = X_generator.flow_from_directory(directory = os.path.dirname(
                         color_mode = "rgb",
                         **args_flow)
 
+if no_data_class == True: args_aug["cval"] = NoDataValue
 y_generator = ks.preprocessing.image.ImageDataGenerator(**args_aug,
-                                                        cval = NoDataValue)
+                                                        dtype = "uint8")
 y_gen = y_generator.flow_from_directory(directory = os.path.dirname(
                         dir_tls(myear = year, dset = "y")),
                         color_mode = "grayscale",
@@ -69,14 +69,15 @@ y_gen = y_generator.flow_from_directory(directory = os.path.dirname(
                         **args_flow)
 
 train_generator = zip(X_gen, y_gen)
-# val generator
+
+### validation data generator
 X_val_generator = ks.preprocessing.image.ImageDataGenerator(rescale = 1.0/255.0)
 X_val_gen = X_generator.flow_from_directory(directory = os.path.dirname(
                         dir_tls(myear = year, dset = "X_val")),
                         color_mode = "rgb",
                         **args_flow)
 
-y_val_generator = ks.preprocessing.image.ImageDataGenerator()
+y_val_generator = ks.preprocessing.image.ImageDataGenerator(dtype = "uint8")
 y_val_gen = y_generator.flow_from_directory(directory = os.path.dirname(
                         dir_tls(myear = year, dset = "y_val")),
                         color_mode = "grayscale",
@@ -84,28 +85,3 @@ y_val_gen = y_generator.flow_from_directory(directory = os.path.dirname(
                         **args_flow)
 
 val_generator = zip(X_val_gen, y_val_gen)
-### logs and callbacks
-os.chdir(dir_out())# write logs to out dir
-# define callbacks
-from tensorflow.keras.callbacks import LearningRateScheduler
-
-def step_decay_schedule(initial_lr = 1e-3,
-                        decay_factor = 0.75, step_size = 10):
-    '''
-    Wrapper function to create a LearningRateScheduler with step decay schedule.
-    '''
-    def schedule(epoch):
-        return initial_lr * (decay_factor ** np.floor(epoch/step_size))
-    
-    return LearningRateScheduler(schedule)
-
-lr_sched = step_decay_schedule(initial_lr = 1e-4,
-                               decay_factor = 0.75, step_size = 2)
-# list callbacks
-cllbs = [
-    ks.callbacks.EarlyStopping(patience = 8),
-    ks.callbacks.ModelCheckpoint(dir_out("Checkpoint.h5"),
-                                 save_best_only = True),
-    lr_sched,
-    ks.callbacks.TensorBoard(log_dir = dir_out("logs"))
-    ]
