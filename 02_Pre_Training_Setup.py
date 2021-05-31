@@ -37,8 +37,8 @@ args_col = {"data_format" : "channels_last",
             "brightness_range" : [0.5, 1.5]
             }
 args_aug = {"rotation_range" : 365,
-            "width_shift_range" : 0.05,
-            "height_shift_range" : 0.05,
+            "width_shift_range" : 0.2,
+            "height_shift_range" : 0.2,
             "horizontal_flip" : True,
             "vertical_flip" : True,
             "fill_mode" : "constant",
