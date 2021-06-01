@@ -1,0 +1,136 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Jun  1 08:19:50 2021
+
+@author: Manuel
+Georeferencing quick and dirty. Do not try this at home!
+"""
+import pathlib, os
+import numpy as np
+
+from PIL import Image
+from PIL.ExifTags import TAGS, GPSTAGS
+from pyproj import Proj, Transformer
+
+folder = "F:/Test"#"F:/Block_1/Block1_6/"
+out_folder = "F:/Test"#"F:/Block_1/Block1_6_GeoTIFF"
+file_extension = ".jpg"
+inProj = "epsg:4326"
+outProj = "epsg:32735"
+altitude = 40
+cam_angle_deg = -90
+cam_angle_rad = None
+ground_resolution_x = 0.012 # should be possible to calculate, but I have no time for this atm
+ground_resolution_y = ground_resolution_x # just because no real value was calculated
+
+if cam_angle_rad == None:
+    cam_angle_rad = cam_angle_deg*np.pi/180
+# list files
+files = list(pathlib.Path(folder).glob("**/*" + file_extension))
+
+# functions to extract location in UTM
+def get_GPS_loc(filename):
+    image = Image.open(filename)
+    image.verify()
+    exif = image._getexif()
+    geotag = {}
+    for (idx, tag) in TAGS.items():
+        if tag == "GPSInfo":
+            if idx not in exif:
+                    raise ValueError("No EXIF geotagging found!")
+            for (key, val) in GPSTAGS.items():
+                if key in exif[idx]:
+                    geotag[val] = exif[idx][key]
+    return geotag
+
+def dms_to_dd(dms, ref):
+    degrees = dms[0]
+    minutes = dms[1] / 60.0
+    seconds = dms[2] / 3600.0
+    if ref in ["S", "W"]:
+        degrees = -degrees
+        minutes = -minutes
+        seconds = -seconds
+    return round(degrees + minutes + seconds, 5)
+
+def get_coordinates(geotag):
+    lat = dms_to_dd(geotag["GPSLatitude"],
+                    geotag["GPSLatitudeRef"])
+    lon = dms_to_dd(geotag["GPSLongitude"],
+                    geotag["GPSLongitudeRef"])
+    return (lat, lon)
+
+# extract UTM locations
+coords = []
+for filename in files:  
+    lat, lon = get_coordinates(get_GPS_loc(filename))
+    transformer = Transformer.from_crs(inProj, outProj)
+    UTMY, UTMX = transformer.transform(lat, lon)
+    coords.append(np.array([UTMY, UTMX]))
+
+# extract current flight direction (drone orientation)
+v_hat = []
+for i in range(len(files) - 2):
+    v = coords[i + 1] - coords[i]
+    unit = v / np.linalg.norm(v)
+    if any(unit != unit):
+        unit = v_hat[i - 1]
+    v_hat.append(unit)
+
+def get_orientation(vec):
+    N = vec[0] > 0.5
+    O = vec[1] > 0.5
+    return [N, O]
+
+orientation = [get_orientation(i) for i in v_hat]
+
+# calculate vector between drone nadir and image center
+def pos_shift(alt, cam_ang, direction):
+    shift_x = np.tan(np.pi/2 + cam_ang)*alt
+    shift_v = shift_x*direction
+    return shift_v
+
+shift_vectors = [pos_shift(alt = altitude, cam_ang = cam_angle_rad,
+                           direction = i) for i in v_hat]
+# calculate image centers
+img_centers = coords + shift_vectors
+
+from PIL import Image
+def get_img_metadata(filename):
+    image = Image.open(filename)
+    exifdata = image._getexif()
+    for tagid in exifdata:
+        tagname = TAGS.get(tagid, tagid)
+        value = exifdata.get(tagid)
+        if tagname == "ExifImageWidth":
+            img_width = value
+        elif tagname == "ExifImageHeight":
+            img_height = value
+        elif tagname == "FocalLength":
+            focal_length = value
+    return img_width, img_height
+
+#GSDh = altitude * sensor height / focal length * img_height
+#GSDw = altitude * sensor width / focal length * img_width
+from osgeo import gdal, osr
+def translateIMG(path_in, path_out, gt, in_format = "GTiff"):
+    ds = gdal.Open(os.path.join(path_in))
+    ds = gdal.Translate(os.path.join(path_out), ds)
+    ds.SetGeoTransform(gt)
+    ds.SetProjection(outProj)
+    ds = None
+
+for i in range(len(files)):
+    file = files[i]
+    c = img_centers[i]
+    w, h = get_img_metadata(file)
+    ground_w = w * ground_resolution_x
+    ground_h = h * ground_resolution_y
+    upleftX =  c[0] + ground_h
+    upleftY =  c[1] + ground_w
+    # (uperleftx, scalex, skewx, uperlefty, skewy, scaley)
+    # Scale = size of one pixel in units of raster projection
+    gt = [upleftX, ground_resolution_x, 0, upleftY, 0, -ground_resolution_y]
+    path_out = os.path.join(out_folder,
+                            file.name[:len(file.name)-4] + ".tif")
+    translateIMG(file, path_out, gt)
