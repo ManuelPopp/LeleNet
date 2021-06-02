@@ -12,15 +12,15 @@ from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
 from pyproj import Proj, Transformer
 
-folder = "F:/Test"#"F:/Block_1/Block1_6/"
-out_folder = "F:/Test"#"F:/Block_1/Block1_6_GeoTIFF"
+folder = "F:/Tezt"#"F:/Block_1/Block1_6/"
+out_folder = "F:/Tezt"#"F:/Block_1/Block1_6_GeoTIFF"
 file_extension = ".jpg"
 inProj = "epsg:4326"
 outProj = "epsg:32735"
 altitude = 40
-cam_angle_deg = -90
+cam_angle_deg = -60
 cam_angle_rad = None
-ground_resolution_x = 0.012 # should be possible to calculate, but I have no time for this atm
+ground_resolution_x = 0.011 # should be possible to calculate, but I have no time for this atm
 ground_resolution_y = ground_resolution_x # just because no real value was calculated
 
 if cam_angle_rad == None:
@@ -70,19 +70,48 @@ for filename in files:
 
 # extract current flight direction (drone orientation)
 v_hat = []
-for i in range(len(files) - 2):
+for i in range(len(files) - 1):
     v = coords[i + 1] - coords[i]
     unit = v / np.linalg.norm(v)
     if any(unit != unit):
         unit = v_hat[i - 1]
     v_hat.append(unit)
+v_hat.append(unit)# append for the last list image which has no subsequent one
 
 def get_orientation(vec):
-    N = vec[0] > 0.5
-    O = vec[1] > 0.5
-    return [N, O]
+    N = vec[1] > 0.5*np.sqrt(2)
+    O = vec[0] < -0.5*np.sqrt(2)
+    S = vec[1] < -0.5*np.sqrt(2)
+    W = vec[0] > 0.5*np.sqrt(2)
+    return [N, O, S, W]
 
+# rotate images
+import piexif
 orientation = [get_orientation(i) for i in v_hat]
+from PIL import Image
+for i in range(len(files)):
+    file = files[i]
+    if orientation[i] != [1, 0, 0, 0]:
+        img = Image.open(file)
+        if orientation[i] == [0, 0, 1, 0]:
+            angle = 180
+            EXIF = img.getexif()
+            out = img.rotate(angle)#.transpose(Image.FLIP_TOP_BOTTOM)
+            out.save(file, format = img.format, exif = EXIF)
+        else:
+            exif_dict = piexif.load(img.info["exif"])
+            x = exif_dict["0th"][piexif.ImageIFD.XResolution]
+            y = exif_dict["0th"][piexif.ImageIFD.YResolution]
+            exif_dict["0th"][piexif.ImageIFD.XResolution] = y
+            exif_dict["0th"][piexif.ImageIFD.YResolution] = x
+            exif_bytes = piexif.dump(exif_dict)
+            if orientation[i] == [0, 1, 0, 0]:
+                angle = 90
+            elif orientation[i] == [0, 0, 0, 1]:
+                angle = 270
+            out = img.rotate(angle, expand = True)
+            out.save(file, format = img.format, exif = exif_bytes)
+img = None
 
 # calculate vector between drone nadir and image center
 def pos_shift(alt, cam_ang, direction):
@@ -95,7 +124,6 @@ shift_vectors = [pos_shift(alt = altitude, cam_ang = cam_angle_rad,
 # calculate image centers
 img_centers = coords + shift_vectors
 
-from PIL import Image
 def get_img_metadata(filename):
     image = Image.open(filename)
     exifdata = image._getexif()
@@ -126,8 +154,8 @@ for i in range(len(files)):
     w, h = get_img_metadata(file)
     ground_w = w * ground_resolution_x
     ground_h = h * ground_resolution_y
-    upleftX =  c[0] + ground_h
-    upleftY =  c[1] + ground_w
+    upleftX =  c[0] - 0.5*ground_w
+    upleftY =  c[1] + 0.5*ground_h
     # (uperleftx, scalex, skewx, uperlefty, skewy, scaley)
     # Scale = size of one pixel in units of raster projection
     gt = [upleftX, ground_resolution_x, 0, upleftY, 0, -ground_resolution_y]
