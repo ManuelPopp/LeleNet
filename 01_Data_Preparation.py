@@ -9,9 +9,11 @@ Loading data and preparing the training tiles.
 __author__ = "Manuel R. Popp"
 
 ## select plots to use
-use_plots = ["B3_4"]
+use_plots = ["B1_6_0003", "B1_6_0023", "B1_6_0063", "B1_6_0078", "B1_6_0086",\
+             "B1_6_0119"]
+#use_plots = ["B1_6_0023"]
 year = "03_2021"
-no_data_class = True
+no_data_class = False
 
 ## AcrGIS Online log-in
 if not os.path.exists(os.path.join(wd, "gis", "pw.txt")):
@@ -22,7 +24,7 @@ if not os.path.exists(os.path.join(wd, "gis", "pw.txt")):
     for line in file:
         l = line.decode("utf-8")
         b = bytes(l, "utf-8")
-        key = b"5v-V22Z8KfJjs6XlcMaO1OxDhx5mXxC0YMuKTI67pSs="
+        key = None
         fernet = Fernet(key)
     login = eval(fernet.decrypt(b).decode())
     key = Fernet.generate_key()
@@ -90,11 +92,14 @@ def downloadShapefiles(plot_id, path, dateTime = None):
     except Exception as e:
         print(e)
 
-def get_classes(path):
+def get_classes(path, plots):
     from osgeo import ogr
     drv = ogr.GetDriverByName("ESRI Shapefile")
     ## read existing classes
     files = list(pathlib.Path(path).glob("**/*.shp"))
+    folder = list(os.path.basename(file.parent) for file in files)
+    plotfiles = list(np.where(np.isin(folder, plots)))
+    files = [val for val, use in zip(files, np.isin(folder, plots)) if use]
     shapefiles = []
     for file in files:
         par = file.parents[0]
@@ -107,7 +112,7 @@ def get_classes(path):
         layer = dataSource.GetLayer()
         feature = layer.GetNextFeature()
         while feature:
-            class_list.append(feature.GetField("Species"))
+            class_list.append(feature.GetField("SpeciesID"))
             feature = layer.GetNextFeature()
         feature = None
         layer = None
@@ -128,7 +133,7 @@ def encode_classes(path, classes):
         layer.CreateField(FDef)
     feature = layer.GetNextFeature()
     while feature:
-        spec = feature.GetField("Species")
+        spec = feature.GetField("SpeciesID")
         c = classes.index(spec)
         feature.SetField("Class", c)
         layer.SetFeature(feature)
@@ -186,7 +191,7 @@ def check_version(file, derived_from):
             return file_mod > from_mod
 
 ## download image extents shapefile
-if os.path.isfile(os.path.join(dir_shp("Extents", myear = year),
+if not os.path.isfile(os.path.join(dir_shp("Extents", myear = year),
                                "Extents.shp")):
     last_modified = None
 else:
@@ -196,7 +201,7 @@ downloadShapefiles(plot_id = "Extents",
                            path = dir_shp("Extents", myear = year),
                            dateTime = last_modified)
 Ext = os.path.join(dir_shp("Extents", myear = year), "Extents.shp")
-ExtUTM = s[:len(s)-4] + "_UTM.shp"
+ExtUTM = Ext[:len(Ext)-4] + "_UTM.shp"
 ## transform extents shapefile to UTM Zone 35S
 drv = ogr.GetDriverByName("ESRI Shapefile")
 if os.path.exists(ExtUTM):
@@ -209,8 +214,9 @@ ds = gdal.VectorTranslate(ExtUTM, srcDS, format = "ESRI Shapefile",
 ds = None
 srcDS = None
 ### write .prj file
-with open(f"{os.path.splitext(sUTM)[0]}.prj", "w") as f:
-    f.write(crs1)
+import re
+with open(f"{os.path.splitext(ExtUTM)[0]}.prj", "w") as f:
+    f.write(re.sub(" +", " ",str(crs).replace("\n", "")))
 
 # run for each image or plot
 for plot in use_plots:
@@ -227,7 +233,7 @@ for plot in use_plots:
     shp_path = list(pathlib.Path(dir_shp(plot, myear = year)) \
                     .glob("**/*" + plot + ".shp"))[0]
 ## get class IDs
-classes_decoded = get_classes(dir_shp(myear = year))
+classes_decoded = get_classes(dir_shp(myear = year), plots = use_plots)
 classes = range(len(classes_decoded))
 NoDataValue = max(classes) + 1
 save_var(variables = [classes, classes_decoded, NoDataValue, no_data_class],
@@ -274,18 +280,32 @@ for plot in use_plots:
         drv = ogr.GetDriverByName("ESRI Shapefile")
         shp = drv.Open(sUTM)
         layer = shp.GetLayer()
-        x_min, x_max, y_min, y_max = (sys.maxsize, 0, sys.maxsize, 0)
-        feature = layer.GetNextFeature()
-        while feature:
-            geom = feature.GetGeometryRef()
-            extent = geom.GetEnvelope()
-            x_min = min(x_min, extent[0])
-            x_max = max(x_max, extent[1])
-            y_min = min(y_min, extent[2])
-            y_max = max(y_max, extent[3])
+        extent_from_shapefile = False
+        if extent_from_shapefile:
+            x_min, x_max, y_min, y_max = (sys.maxsize, 0, sys.maxsize, 0)
             feature = layer.GetNextFeature()
-        feature = None
-        extent = (x_min, x_max, y_min, y_max)
+            while feature:
+                geom = feature.GetGeometryRef()
+                extent = geom.GetEnvelope()
+                x_min = min(x_min, extent[0])
+                x_max = max(x_max, extent[1])
+                y_min = min(y_min, extent[2])
+                y_max = max(y_max, extent[3])
+                feature = layer.GetNextFeature()
+            feature = None
+            extent = (x_min, x_max, y_min, y_max)
+        else:
+            Ext = drv.Open(ExtUTM)
+            lr = Ext.GetLayer()
+            ft = lr.GetNextFeature()
+            while ft:
+                if ft.GetField("Image") == plot:
+                    geom = ft.GetGeometryRef()
+                    extent = geom.GetEnvelope()
+                ft = lr.GetNextFeature()
+            ft = None
+            lr = None
+            x_min, x_max, y_min, y_max = extent
         t_crop = t[:len(t)-4] + "_CROP.tif"
         tif = gdal.Open(t)
         tif_crop = gdal.Warp(t_crop, tif,
@@ -315,14 +335,14 @@ for plot in use_plots:
         layer = None
         shp = None
     else:
-        t_crop = dir_omk(plot, type_ext = "_CROP")
-        m = dir_omk(plot, type_ext = "_MASK")
+        t_crop = os.path.join(dir_omk(plot, type_ext = "_CROP")[0])
+        m = os.path.join(dir_omk(plot, type_ext = "_MASK")[0])
     ### check if training tiles were generated previously and are up-to-date
     if check_version(file = list(pathlib.Path(dir_tls(plot_id = plot,
                                                    myear = year)) \
                               .glob("**/*_y.tif")),
                   derived_from = list(pathlib.Path(dir_omk(myear = year)). \
-                                      glob("**/*MASK.tif"))
+                                      glob("**/*" + plot + "_MASK.tif"))
                   ) in (None, False):
         ## create tiles
         ### blacken pixels not assigned to any class
@@ -343,10 +363,10 @@ for plot in use_plots:
         xpx = xtiles*int(imgc)
         ### offset the raster so the unused area is equally distributed at all
         ### sides of the rectangle
-        yoffset = 0.5*(r - ypx)
-        xoffset = 0.5*(r - xpx)
-        ymax = Ymax - yoffset
-        xmax = Xmax - xffset
+        yoffset = math.floor(0.5*(r - ypx))
+        xoffset = math.floor(0.5*(c - xpx))
+        ymax = Ymax - yoffset * res
+        xmin = Xmin + xoffset * res
         ### walk North, since we're in the southern hemisphere
         ycrds = [ymax - res*imgr*m for m in range(ytiles+1)]
         xcrds = [xmin + res*imgc*n for n in range(xtiles+1)]
@@ -381,20 +401,21 @@ for plot in use_plots:
 ### delete all-black tiles
 y_tiles = list(pathlib.Path(dir_tls(myear = year, dset = "y")) \
                .glob("**/*.tif"))
-all_black = []
-for i in y_tiles:
-    tile = gdal.Open(os.path.join(i))
-    band = tile.GetRasterBand(1)
-    vals = np.unique(band.ReadAsArray())
-    band = None
-    tile = None
-    if min(vals) == NoDataValue and max(vals) == NoDataValue:
-        all_black.append(i)
-for i in all_black:
-    corr_X = os.path.join(i.parents[2], "X", "0",
-                          str(i.name).replace("y", "X"))
-    os.remove(corr_X)
-    os.remove(os.path.join(i))
+if no_data_class:
+    all_black = []
+    for i in y_tiles:
+        tile = gdal.Open(os.path.join(i))
+        band = tile.GetRasterBand(1)
+        vals = np.unique(band.ReadAsArray())
+        band = None
+        tile = None
+        if min(vals) == NoDataValue and max(vals) == NoDataValue:
+            all_black.append(i)
+    for i in all_black:
+        corr_X = os.path.join(i.parents[2], "X", "0",
+                              str(i.name).replace("y", "X"))
+        os.remove(corr_X)
+        os.remove(os.path.join(i))
 
 ## split in training and validation set
 ### set share of validation tiles
