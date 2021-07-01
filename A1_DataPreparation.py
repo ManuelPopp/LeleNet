@@ -10,8 +10,7 @@ __author__ = "Manuel R. Popp"
 
 ## select plots to use
 use_plots = ["B1_6_0003", "B1_6_0023", "B1_6_0063", "B1_6_0078", "B1_6_0086",\
-             "B1_6_0119"]
-#use_plots = ["B1_6_0023"]
+             "B1_6_0119", "B1_6_0136", "B1_6_0140"]
 year = "03_2021"
 no_data_class = False
 
@@ -230,16 +229,18 @@ for plot in use_plots:
     downloadShapefiles(plot_id = plot,
                            path = dir_shp(plot, myear = year),
                            dateTime = last_modified)
-    shp_path = list(pathlib.Path(dir_shp(plot, myear = year)) \
-                    .glob("**/*" + plot + ".shp"))[0]
 ## get class IDs
 classes_decoded = get_classes(dir_shp(myear = year), plots = use_plots)
+# NoDataValue = Class "bare soil"
+NoDataValue = len(classes_decoded)
 classes = range(len(classes_decoded))
-NoDataValue = max(classes) + 1
+
 save_var(variables = [classes, classes_decoded, NoDataValue, no_data_class],
          name = "ClassIDs")
 
 for plot in use_plots:
+    shp_path = list(pathlib.Path(dir_shp(plot, myear = year)) \
+                    .glob("**/*" + plot + ".shp"))[0]
     encode_classes(path = os.path.join(shp_path), classes = classes_decoded)
     ### tif and shp path
     t = os.path.join(dir_omk(plot)[0])
@@ -340,7 +341,7 @@ for plot in use_plots:
     ### check if training tiles were generated previously and are up-to-date
     if check_version(file = list(pathlib.Path(dir_tls(plot_id = plot,
                                                    myear = year)) \
-                              .glob("**/*_y.tif")),
+                              .glob("**/*_y." + yf)),
                   derived_from = list(pathlib.Path(dir_omk(myear = year)). \
                                       glob("**/*" + plot + "_MASK.tif"))
                   ) in (None, False):
@@ -390,17 +391,29 @@ for plot in use_plots:
                 xmax = xcrds[j+1]
                 x = str(counter).zfill(8)
                 fntif = dir_tls(plot_id = plot,
-                                myear = year, dset = "X") + x + "_X.tif"
+                                myear = year, dset = "X") + x + "_X." + xf
                 fnmsk = dir_tls(plot_id = plot,
-                                myear = year, dset = "y") + x + "_y.tif"
-                gdal.Warp(fntif, tif, outputBounds = (xmin, ymin, xmax, ymax))
-                gdal.Warp(fnmsk, mask, outputBounds = (xmin, ymin, xmax, ymax))
+                                myear = year, dset = "y") + x + "_y." + yf
+                # https://gdal.org/python/osgeo.gdal-module.html#TranslateOptions
+                os.environ["GDAL_PAM_ENABLED"] = "NO"# suppress .aux files
+                if xf == "tif":# clip and save as tif
+                    gdal.Warp(fntif, tif,
+                              outputBounds = (xmin, ymin, xmax, ymax))
+                elif xf == "png":# clip and save as png
+                    gdal.Translate(fntif, tif,
+                                   projWin = [xmin, ymax, xmax, ymin])
+                if yf == "tif":# clip and save as tif
+                    gdal.Warp(fnmsk, mask,
+                              outputBounds = (xmin, ymin, xmax, ymax))
+                elif yf == "png":# clip and save as png
+                    gdal.Translate(fnmsk, mask,
+                                   projWin = [xmin, ymax, xmax, ymin])
                 counter = counter + 1
         tif = None
         mask = None
 ### delete all-black tiles
 y_tiles = list(pathlib.Path(dir_tls(myear = year, dset = "y")) \
-               .glob("**/*.tif"))
+               .glob("**/*." + yf))
 if no_data_class:
     all_black = []
     for i in y_tiles:
@@ -422,7 +435,7 @@ if no_data_class:
 tst_share = 0.1
 val_share = 0.25
 N_tot = len(list(pathlib.Path(dir_tls(myear = year, dset = "X")) \
-                         .glob("**/*.tif")))
+                         .glob("**/*." + xf)))
 ### check if tiles are up-to-date
 tiles_Xmfd = pathlib.Path(dir_tls(myear = year, dset = "X")).stat() \
     .st_mtime
@@ -442,9 +455,9 @@ for SET in ["tst", "val"]:
         os.makedirs(dir_tls(myear = year, dset = "X_" + SET), exist_ok = True)
         os.makedirs(dir_tls(myear = year, dset = "y_" + SET), exist_ok = True)
         N_totX = len(list(pathlib.Path(dir_tls(myear = year, dset = "X")) \
-                         .glob("**/*.tif")))
+                         .glob("**/*." + xf)))
         N_toty = len(list(pathlib.Path(dir_tls(myear = year, dset = "y")) \
-                         .glob("**/*.tif")))
+                         .glob("**/*." + yf)))
         if not N_totX == N_toty:
             raise Exception("Number of X tiles does not match y tiles.")
         else:
@@ -454,10 +467,10 @@ for SET in ["tst", "val"]:
         import random
         set_indices = random.sample(range(N_tot), N_set)
         X_tiles = list(pathlib.Path(dir_tls(myear = year, dset = "X")) \
-                         .glob("**/*.tif"))
+                         .glob("**/*." + xf))
         X_set_tiles = [X_tiles[i] for i in set_indices]
         y_tiles = list(pathlib.Path(dir_tls(myear = year, dset = "y")) \
-                         .glob("**/*.tif"))
+                         .glob("**/*." + yf))
         y_set_tiles = [y_tiles[i] for i in set_indices]
         for X_tile in X_set_tiles:
             shutil.move(os.path.join(X_tile),
