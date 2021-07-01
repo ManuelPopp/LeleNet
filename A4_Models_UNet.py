@@ -87,7 +87,7 @@ def UNet(n_classes, input_shape = (imgr, imgc, imgdim), dropout = 0.5,
     # output layer
     outputz = ks.layers.Conv2D(n_classes, 1, activation = "softmax")(uc9)
     
-    model = tf.keras.Model(inputs = [inputz], outputs = [outputz])
+    model = ks.Model(inputs = [inputz], outputs = [outputz])
     print(model.summary())
     print(f'Total number of layers: {len(model.layers)}')
     return model
@@ -95,28 +95,5 @@ def UNet(n_classes, input_shape = (imgr, imgc, imgdim), dropout = 0.5,
 # get model
 model = UNet(n_classes = N_CLASSES)
 
-# list callbacks
-logdir = os.path.join(dir_out("logs"), datetime.datetime.now() \
-                      .strftime("%y-%m-%d-%H-%M-%S"))
-os.makedirs(logdir)
-os.chdir(logdir)
-cllbs = [
-    ks.callbacks.EarlyStopping(patience = 8),
-    ks.callbacks.ModelCheckpoint(dir_out("Checkpoint.h5"),
-                                 save_best_only = True),
-    ks.callbacks.TensorBoard(log_dir = logdir)
-    ]
-# compile model
-optimizer = ks.optimizers.RMSprop(learning_rate = 0.0001)
-model.compile(optimizer = optimizer, loss = "sparse_categorical_crossentropy",
-              metrics = ["accuracy"])
-model.summary()
-# fit model
-model.fit(train_generator, epochs = 45, steps_per_epoch = np.ceil(N_img/bs),
-                 validation_data = val_generator,
-                 validation_steps = np.ceil(N_val/bs),
-                 callbacks = cllbs)
-os.chdir(dir_out())
-# save model
+# directory to save model
 os.makedirs(dir_out("mod_UNet"), exist_ok = True)
-model.save(dir_out("mod_UNet"))
