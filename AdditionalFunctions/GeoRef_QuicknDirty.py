@@ -1,19 +1,24 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Created on Tue Jun  1 08:19:50 2021
 
 @author: Manuel
-Georeferencing quick and dirty. Do not try this at home!
 """
-import pathlib, os
+import pathlib, os, sys
 import numpy as np
 
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
 from pyproj import Proj, Transformer
 
-folder = "F:/Tezt"#"F:/Block_1/Block1_6/"
-out_folder = "F:/Tezt"#"F:/Block_1/Block1_6_GeoTIFF"
+# if ran from terminal with additional arguments
+folder = sys.argv[1]
+out_folder = sys.argv[2]
+if len(sys.argv) < 3:
+    folder = "F:/Block_3/Block3_4/"
+    out_folder = "F:/Block_3/Block3_4_GeoTIFF"
+
 file_extension = ".jpg"
 inProj = "epsg:4326"
 outProj = "epsg:32735"
@@ -72,23 +77,22 @@ for filename in files:
 v_hat = []
 for i in range(len(files) - 1):
     v = coords[i + 1] - coords[i]
-    unit = v / np.linalg.norm(v)
-    if any(unit != unit):
+    unit = (v / np.linalg.norm(v)) if np.linalg.norm(v) != 0. else np.array([1., 1.])   
+    if not isinstance(unit[0], float):#any(unit != unit):
         unit = v_hat[i - 1]
     v_hat.append(unit)
 v_hat.append(unit)# append for the last list image which has no subsequent one
 
 def get_orientation(vec):
     N = vec[1] > 0.5*np.sqrt(2)
-    O = vec[0] < -0.5*np.sqrt(2)
+    O = vec[0] > 0.5*np.sqrt(2)
     S = vec[1] < -0.5*np.sqrt(2)
-    W = vec[0] > 0.5*np.sqrt(2)
+    W = vec[0] < -0.5*np.sqrt(2)
     return [N, O, S, W]
 
 # rotate images
 import piexif
 orientation = [get_orientation(i) for i in v_hat]
-from PIL import Image
 for i in range(len(files)):
     file = files[i]
     if orientation[i] != [1, 0, 0, 0]:
@@ -106,23 +110,25 @@ for i in range(len(files)):
             exif_dict["0th"][piexif.ImageIFD.YResolution] = x
             exif_bytes = piexif.dump(exif_dict)
             if orientation[i] == [0, 1, 0, 0]:
-                angle = 90
-            elif orientation[i] == [0, 0, 0, 1]:
                 angle = 270
+            else:#elif orientation[i] == [0, 0, 0, 1]:
+                angle = 90
             out = img.rotate(angle, expand = True)
             out.save(file, format = img.format, exif = exif_bytes)
+    else:
+        pass
 img = None
 
 # calculate vector between drone nadir and image center
 def pos_shift(alt, cam_ang, direction):
-    shift_x = np.tan(np.pi/2 + cam_ang)*alt
-    shift_v = shift_x*direction
+    shift_x = np.tan(np.pi/2 + np.float64(cam_ang))*np.float64(alt)
+    shift_v = np.multiply(shift_x, direction)
     return shift_v
 
 shift_vectors = [pos_shift(alt = altitude, cam_ang = cam_angle_rad,
                            direction = i) for i in v_hat]
 # calculate image centers
-img_centers = coords + shift_vectors
+img_centers = [coords[i] + shift_vectors[i] for i in range(len(coords))]
 
 def get_img_metadata(filename):
     image = Image.open(filename)
@@ -134,8 +140,8 @@ def get_img_metadata(filename):
             img_width = value
         elif tagname == "ExifImageHeight":
             img_height = value
-        elif tagname == "FocalLength":
-            focal_length = value
+        #elif tagname == "FocalLength":
+            #focal_length = value
     return img_width, img_height
 
 #GSDh = altitude * sensor height / focal length * img_height
@@ -148,6 +154,7 @@ def translateIMG(path_in, path_out, gt, in_format = "GTiff"):
     ds.SetProjection(outProj)
     ds = None
 
+os.makedirs(out_folder, exist_ok = True)
 for i in range(len(files)):
     file = files[i]
     c = img_centers[i]
