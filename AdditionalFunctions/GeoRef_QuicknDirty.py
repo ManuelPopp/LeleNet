@@ -4,6 +4,10 @@
 Created on Tue Jun  1 08:19:50 2021
 
 @author: Manuel
+
+Execute from terminal with both of the following arguments:
+1. "/path/to/files"
+2. "/path/to/output"
 """
 import pathlib, os, sys
 import numpy as np
