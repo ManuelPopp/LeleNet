@@ -17,11 +17,51 @@ from PIL.ExifTags import TAGS, GPSTAGS
 from pyproj import Proj, Transformer
 
 # if ran from terminal with additional arguments
-folder = sys.argv[1]
-out_folder = sys.argv[2]
-if len(sys.argv) < 3:
-    folder = "F:/Block_3/Block3_4/"
+import argparse
+
+def parseArguments():
+    parser = argparse.ArgumentParser()
+    # Positional mandatory arguments
+    parser.add_argument("folder", help = "Path to the original files.",\
+                        type = str)
+    parser.add_argument("out_folder", help = "Output files path.",\
+                        type = str)
+    # Optional arguments
+    parser.add_argument("-n", "--name",\
+                        help = "Image prefix.",\
+                            type = str, default = "")
+    parser.add_argument("-reppref", "--replprefix",\
+                        help = "Image prefix to replace. Standard: DJI.",\
+                            type = str, default = "DJI")
+    # Parse arguments
+    args = parser.parse_args()
+    return args
+
+args = None
+name = ""
+old_prefix = ""
+if __name__ == "__main__":
+    # Parse the arguments
+    args = parseArguments()
+
+# else
+if args is None:
+    folder = "F:/Block_3/Block3_4"
     out_folder = "F:/Block_3/Block3_4_GeoTIFF"
+    name = "B3_4"
+else:
+    folder = args.folder
+    out_folder = args.out_folder
+    name = args.name
+    old_prefix = args.replprefix
+
+if name == "":
+    import re
+    regex = re.compile("Block\d_\d")
+    try:
+        prefix = regex.search(str(folder)).group(0).replace("lock", "")
+    except AttributeError:
+        prefix = ""
 
 file_extension = ".jpg"
 inProj = "epsg:4326"
@@ -170,6 +210,13 @@ for i in range(len(files)):
     # (uperleftx, scalex, skewx, uperlefty, skewy, scaley)
     # Scale = size of one pixel in units of raster projection
     gt = [upleftX, ground_resolution_x, 0, upleftY, 0, -ground_resolution_y]
-    path_out = os.path.join(out_folder,
-                            file.name[:len(file.name)-4] + ".tif")
+    p_out = os.path.join(out_folder,
+                         file.name[:len(file.name)-4] + ".tif")
+    if old_prefix != "":
+        path_out = p_out.replace(old_prefix, prefix)
+    elif prefix != "":
+        path_out = os.path.join(out_folder,
+                         prefix + file.name[:len(file.name)-4] + ".tif")
+    else:
+        path_out = p_out
     translateIMG(file, path_out, gt)
