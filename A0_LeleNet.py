@@ -74,6 +74,13 @@ def get_var(name):
     
 os.chdir(wd)
 
+with open(dir_out("System_info.txt"), "w") as f:
+    f.write("Most recent run on " + OS + " " + OS_version +
+            ".\nPython version: " +
+            py_version + "\nTensorflow version: " + tf.__version__ +
+            "\nUTC time (start): " + str(t_start) +
+            "\nLocal time (start): " + str(datetime.datetime.now()))
+
 #### data preparation directory functions--------------------------------------
 import pathlib
 def dir_omk(plot_id = None, myear = None, type_ext = ""):
