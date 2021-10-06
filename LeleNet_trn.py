@@ -5,22 +5,26 @@ Created on Mon May 17 17:56:34 2021
 
 @author: Manuel
 Full implementation
-runfrom terminal: python ./LeleNet.py "U-Net" 10
+runfrom terminal: python ~/LeleNet/py3/LeleNet_trn.py "U-Net" 10 40
 """
 __author__ = "Manuel R. Popp"
 
 #### parse arguments-----------------------------------------------------------
-# Standard settings
-xf = "png"
-yf = "png"
-imgr = 256
-imgc = 256
-imgdim = 3
-wd = "home"# only for special use case
-model = "UNet"
-bs = 1
-epochz = 3
+# Standard settings for testing
+if False:
+    xf = "png"
+    yf = "png"
+    imgr = 256
+    imgc = 256
+    imgdim = 3
+    wd = "home"
+    mdl = "UNet"
+    bs = 1
+    epochz = 3
+    year = "03_2021"
+    optmer = "rms"
 
+# Import arguments
 import argparse
 
 def parseArguments():
@@ -33,6 +37,15 @@ def parseArguments():
     parser.add_argument("ep", help = "Training epochs (int)",\
                         type = int)
     # Optional arguments
+    parser.add_argument("-lr", "--lr",\
+                        help = "Initial learning rate (float).",\
+                            type = float, default = 1e-3)
+    parser.add_argument("-esp", "--esp",\
+                        help = "Early stopping patience (int).",\
+                            type = int, default = None)
+    parser.add_argument("-op", "--op",\
+                        help = "Optimizer. 'Adam', 'rms', or 'sgd'.",\
+                            type = str, default = "rms")
     parser.add_argument("-xf", "--xf",\
                         help = "Image format; either png, jpg, or tif.",\
                             type = str, default = "png")
@@ -41,13 +54,27 @@ def parseArguments():
                             type = str, default = "png")
     parser.add_argument("-imgr", "--imgr",\
                         help = "Image x resolution (rows).", type = int,\
-                            default = 256)
+                            default = None)
     parser.add_argument("-imgc", "--imgc",\
-                        help = "Image y resolution (columns).",type = int,\
-                            default = 256)
+                        help = "Image y resolution (columns).", type = int,\
+                            default = None)
+    parser.add_argument("-imgd", "--imgd",\
+                        help = "Image dimensions (rows = columns).",\
+                            type = int, default = None)
+    parser.add_argument("-imgdim", "--imgdim",\
+                        help = "X image dimensions (colours).", type = int,\
+                            default = 3)
+    parser.add_argument("-ww", "--ww",\
+                        help = ("Weights exponent. Inverse weights =" +\
+                            "1/(weights**ww)"), type = float,\
+                            default = 0.5)
     parser.add_argument("-wd", "--wd",\
-                        help = "Alternative working directory.",type = str,\
+                        help = "Alternative working directory.", type = str,\
                             default = "")
+    parser.add_argument("-yr", "--yr",\
+                        help = ("Sampling date of the data" +\
+                                "as MM_YYYY. Default: '03_2021'"),\
+                            type = str, default = "03_2021")
     # Parse arguments
     args = parser.parse_args()
     return args
@@ -55,15 +82,25 @@ if __name__ == "__main__":
     # Parse the arguments
     args = parseArguments()
 
-xf = args.xf
-yf = args.yf
-imgr = args.imgr
-imgc = args.imgc
+mdl = args.model
 bs = args.bs
 epochz = args.ep
+init_lr = args.lr
+es_patience = args.esp if args.esp is not None else epochz
+optmer = args.op
+xf = args.xf
+yf = args.yf
+imgdim = args.imgdim
+ww = args.ww
+wd = args.wd
+year = args.yr
+
+# case insensitive arguments
+mdl, optmer, xf, yf, wd = mdl.casefold(), optmer.casefold(),\
+    xf.casefold(), yf.casefold(), wd.casefold()
 
 #### basic settings------------------------------------------------------------
-import platform, sys, datetime
+import platform, sys, datetime, pathlib, os
 OS = platform.system()
 OS_version = platform.release()
 py_version = sys.version
@@ -75,17 +112,21 @@ print("Running on " + OS + " " + OS_version + ".\nPython version: " +
       "\nLocal time (start): " + str(datetime.datetime.now()))
 
 # Model (one of "mod_UNet", "mod_FCD")
-if model in ["U-Net", "UNet", "unet", "mod_UNet"]:
+if mdl in ["u-net", "unet", "mod_unet", "mod_u-net", "u_net"]:
     mod = "mod_UNet"
-else:
+elif mdl in ["fcd", "fcdensenet", "fc-densenet", "fc-dense-net"]:
     mod = "mod_FCD"
+else:
+    raise ValueError("Unexpected input for argument 'model': " + str(mdl))
 
 ### general directory functions------------------------------------------------
-import os
 import numpy as np
 if wd == "home":
     if OS == "Linux":
-        wd = "/home/manuel/Nextcloud/Masterarbeit"
+        if platform.release() == "4.18.0-193.60.2.el8_2.x86_64":
+            wd = "/home/kit/ifgg/mp3890/LeleNet"
+        else:
+            wd = "/home/manuel/Nextcloud/Masterarbeit"
     elif OS == "Windows":
         wd = os.path.join("C:\\", "Users", "Manuel",\
                           "Nextcloud", "Masterarbeit")
@@ -143,7 +184,6 @@ with open(dir_out("System_info.txt"), "w") as f:
             "\nLocal time (start): " + str(datetime.datetime.now()))
 
 #### data preparation directory functions--------------------------------------
-import pathlib
 def dir_omk(plot_id = None, myear = None, type_ext = ""):
     # returns list!
     if plot_id == None:
@@ -179,17 +219,41 @@ def dir_tls(plot_id = None, myear = None, dset = None):
         else:
             if dset == None:
                 return os.path.join(dir_dat("tls"), myear)
-                raise Exception("Missing dset (X or y). Returning tile directory.")
+                raise Exception("Missing dset (X or y)." +\
+                                "Returning tile directory.")
             else:
                 return os.path.join(dir_dat("tls"), myear, dset, "0", plot_id)
 def toINT(filename):
     imgINT = filename.astype("uint8")
     return imgINT
 
-# Data preparation-------------------------------------------------------------
-## select year for data preparation
-year = "03_2021"
+# get tile dimensions if not specified-----------------------------------------
+from PIL import Image
+if (args.imgr is None or args.imgc is None) and args.imgd is None:
+    imgs = list(pathlib.Path(os.path.dirname(dir_tls(myear = year,\
+                                                     dset = "y")))\
+                .glob("**/*." + yf))
+    im = Image.open(imgs[0])
+    w, h = im.size
 
+# image dimensions
+if args.imgr != args.imgc:
+    print("Warning: Arguments imgr and imgc do not match.")
+if args.imgr is not None:
+    imgr = args.imgr
+else:
+    imgr = h
+if args.imgc is not None:
+    imgc = args.imgc
+else:
+    imgc = w
+
+if args.imgd is not None:
+    print("Argument imgd set. imgd overwrites imgr and imgc.")
+    imgr = args.imgd
+    imgc = args.imgd
+
+# Data preparation-------------------------------------------------------------
 ### Run file DataPreparation.py
 ###  read dictionary to group species to classes, if need be
 import pandas as pd
@@ -208,7 +272,7 @@ os.chdir(wd)
 
 # import modules---------------------------------------------------------------
 #already done in A0_LeleNet.py: import tensorflow as tf
-import tensorflow_io as tfio
+#import tensorflow_io as tfio
 from tensorflow import keras as ks
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 tf.__version__
@@ -217,13 +281,13 @@ ks.__version__
 ## make GPU available----------------------------------------------------------
 phys_devs = tf.config.experimental.list_physical_devices("GPU")
 print("N GPUs available: ", len(phys_devs))
-if len(phys_devs) >= 1 and False:
-    tf.config.experimental.set_memory_growth(phys_devs[0], True)
-else:
-    #os.environ['CUDA_VISIBLE_DEVICES'] = "-1"
-    my_devices = tf.config.experimental.list_physical_devices(device_type = "CPU")
-    tf.config.experimental.set_visible_devices(devices = my_devices, device_type = "CPU")
-    print("No GPUs used.")
+#if len(phys_devs) >= 1 and False:
+#    tf.config.experimental.set_memory_growth(phys_devs[0], True)
+#else:
+#    #os.environ['CUDA_VISIBLE_DEVICES'] = "-1"
+#    my_devices = tf.config.experimental.list_physical_devices(device_type = "CPU")
+#    tf.config.experimental.set_visible_devices(devices = my_devices, device_type = "CPU")
+#    print("No GPUs used.")
 
 ## general options/info--------------------------------------------------------
 N_img = len(list(pathlib.Path(dir_tls(myear = year, dset = "X")) \
@@ -305,7 +369,6 @@ print(dataset["train"])
 print(dataset["val"])
 
 # define weighted categorical crossentropy loss function-----------------------
-from PIL import Image
 def calculate_weights(directory, n_classes):
     imgs = list(pathlib.Path(directory).glob("**/*." + yf))
     weights = np.array([0] * n_classes)
@@ -343,15 +406,15 @@ NORMWEIGHTS = WEIGHTS / max(WEIGHTS)
 ### inverse frequency as weights
 #inv_weights = tf.constant((1 / (WEIGHTS + 0.01)), dtype = tf.float32,
 #                          shape = [1, 1, 1, N_CLASSES])
-inv_weights = 1 / (NORMWEIGHTS + 0.01)**(1/2)
+inv_weights = 1 / (NORMWEIGHTS + 0.01)**(ww)
 
 ## add weights-----------------------------------------------------------------
 def add_sample_weights(image, segmentation_mask):
-  class_weights = tf.constant(inv_weights, dtype = tf.float32)
-  class_weights = class_weights/tf.reduce_sum(class_weights)
-  sample_weights = tf.gather(class_weights,
-                             indices = tf.cast(segmentation_mask, tf.int32))
-  return image, segmentation_mask, sample_weights
+    class_weights = tf.constant(inv_weights, dtype = tf.float32)
+    class_weights = class_weights/tf.reduce_sum(class_weights)
+    sample_weights = tf.gather(class_weights,
+                               indices = tf.cast(segmentation_mask, tf.int32))
+    return image, segmentation_mask, sample_weights
 
 dataset["train"].map(add_sample_weights).element_spec
 
@@ -382,7 +445,7 @@ def wcc_loss(y_true, y_pred, n_classes = N_CLASSES, w = inv_weights):
 # Get model--------------------------------------------------------------------
 os.chdir(os.path.join(wd, "py3"))
 if mod == "mod_UNet":
-    def UNet(n_classes, input_shape = (imgr, imgc, imgdim), dropout = 0.05,
+    def UNet(n_classes, input_shape = (imgr, imgc, imgdim), dropout = 0.2,
          ops = {"activation" : "relu",
                 "padding" : "same",
                 "kernel_initializer" : "he_normal"
@@ -474,7 +537,7 @@ if mod == "mod_UNet":
     
     # directory to save model
     os.makedirs(dir_out("mod_UNet"), exist_ok = True)
-elif mod == "FCD":
+elif mod == "mod_FCD":
     def BN_ReLU_Conv(inputs, n_filters, filter_size = 3, dropout_p = 0.2):
         l = ks.layers.BatchNormalization()(inputs)
         l = ks.layers.Activation("relu")(l)
@@ -485,18 +548,19 @@ elif mod == "FCD":
             l = ks.layers.Dropout(dropout_p)(l)
         return l
     
-        def TransitionDown(inputs, n_filters, dropout_p = 0.2):
-            l = BN_ReLU_Conv(inputs, n_filters, filter_size = 1, dropout_p = dropout_p)
-            l = ks.layers.MaxPool2D(pool_size = (2, 2))(l)
-            return l
-        
-        def TransitionUp(skip_connection, block_to_upsample, n_filters_keep):
-            l = ks.layers.concatenate(block_to_upsample)
-            l = ks.layers.Conv2DTranspose(n_filters_keep, kernel_size = (3, 3),
-                                          strides = (2, 2), padding = "same", 
-                                          kernel_initializer = "he_uniform") (l)
-            l = ks.layers.concatenate([l, skip_connection])
-            return l
+    def TransitionDown(inputs, n_filters, dropout_p = 0.2):
+        l = BN_ReLU_Conv(inputs, n_filters, filter_size = 1,\
+                         dropout_p = dropout_p)
+        l = ks.layers.MaxPool2D(pool_size = (2, 2))(l)
+        return l
+    
+    def TransitionUp(skip_connection, block_to_upsample, n_filters_keep):
+        l = ks.layers.concatenate(block_to_upsample)
+        l = ks.layers.Conv2DTranspose(n_filters_keep, kernel_size = (3, 3),
+                                      strides = (2, 2), padding = "same", 
+                                      kernel_initializer = "he_uniform")(l)
+        l = ks.layers.concatenate([l, skip_connection])
+        return l
     
     def FCDense(n_classes, input_shape = (imgr, imgc, imgdim),
                 n_filters_first_conv = 48, n_pool = 4, growth_rate = 12,
@@ -615,14 +679,20 @@ lr_sched = step_decay_schedule(initial_lr = 1e-3,
 Using some simple built-in learning rate decay:
 '''
 lr_sched = ks.optimizers.schedules.ExponentialDecay(
-    initial_learning_rate = 1e-3,
+    initial_learning_rate = init_lr,
     # decay after n steps
     decay_steps = np.floor(N_img/bs),
-    decay_rate = 0.995)
+    decay_rate = 0.95)
 
-optimizer = ks.optimizers.Adam(learning_rate = lr_sched, clipnorm = 1)
-optimizer = ks.optimizers.SGD(learning_rate = 1e-4, clipnorm = 1)
-optimizer = ks.optimizers.RMSprop(learning_rate = lr_sched, clipnorm = 1)# FC-DenseNet Optim.
+if optmer == "adam":
+    optimizer = ks.optimizers.Adam(learning_rate = lr_sched, clipnorm = 1)
+elif optmer == "sgd":
+    optimizer = ks.optimizers.SGD(learning_rate = init_lr, clipnorm = 1)
+elif optmer == "rms":
+    optimizer = ks.optimizers.RMSprop(learning_rate = lr_sched, clipnorm = 1)# FC-DenseNet Optim.
+else:
+    print("Invalid argument for op: " + optmer +\
+          ". Use 'Adam', 'rms', or 'sgd'.")
 
 # list callbacks
 logdir = os.path.join(dir_out("logs"), datetime.datetime.now() \
@@ -632,7 +702,7 @@ os.chdir(logdir)
 cllbs = [
     #ks.callbacks.ReduceLROnPlateau(monitor = "val_loss", factor = 0.2,
     #                               patience = 5, min_lr = 0.001),
-    ks.callbacks.EarlyStopping(patience = 8),
+    ks.callbacks.EarlyStopping(patience = es_patience),
     ks.callbacks.ModelCheckpoint(dir_out("Checkpoint.h5"),
                                  save_best_only = True),
     ks.callbacks.TensorBoard(log_dir = logdir)
@@ -666,14 +736,14 @@ lozz = ks.losses.SparseCategoricalCrossentropy() if N_CLASSES > 2 else\
 ### get intersect. over union (original function gives error -> updated accor-
 ### ding to https://stackoverflow.com/a/61826074/11611246)
 class UpdatedMeanIoU(tf.keras.metrics.MeanIoU):
-  def __init__(self,
-               y_true = None,
-               y_pred = None,
-               num_classes = None,
-               name = None,
-               dtype = None):
-    super(UpdatedMeanIoU, self).__init__(num_classes = num_classes,
-                                         name = name, dtype = dtype)
+    def __init__(self,
+                 y_true = None,
+                 y_pred = None,
+                 num_classes = None,
+                 name = None,
+                 dtype = None):
+        super(UpdatedMeanIoU, self).__init__(num_classes = num_classes,
+                                             name = name, dtype = dtype)
 
   def update_state(self, y_true, y_pred, sample_weight = None):
     y_pred = tf.math.argmax(y_pred, axis = -1)
@@ -682,9 +752,10 @@ mIoU = UpdatedMeanIoU(num_classes = N_CLASSES)
 #mIoU = ks.metrics.MeanIoU(num_classes = N_CLASSES)
 
 #lozz = wcc_loss
+#run_opts = tf.compat.v1.RunOptions(report_tensor_allocations_upon_oom = True)
 model.compile(optimizer = optimizer, loss = lozz,
               metrics = [mIoU#, "sparse_categorical_accuracy"
-                         ])
+                         ])#, options = run_opts)
 model.summary()
 
 # fit model--------------------------------------------------------------------
@@ -701,6 +772,95 @@ else:
                      callbacks = cllbs)
 
 os.chdir(dir_out())
+
 # save model-------------------------------------------------------------------
-os.makedirs(dir_out("mod"), exist_ok = True)
-model.save(dir_out(mod))
+os.makedirs(dir_out(mod), exist_ok = True)
+model.save(dir_out(mod), save_format = "tf", save_traces = True)
+print("Model saved to disc.")
+
+##############################################################################
+##############################################################################
+##############################################################################
+trained_model = ks.models.load_model(dir_out(mod),\
+                                     custom_objects = {"UpdatedMeanIoU": mIoU})
+from matplotlib import pyplot as plt
+from matplotlib.colors import Normalize
+import numpy as np
+def display_sample(display_list, x = 0):
+    """Show side-by-side an input image,
+    the ground truth and the prediction.
+    """
+    plt.figure(figsize = (18, 18))
+
+    title = ["Input Image", "True Mask", "Predicted Mask"]
+    plt.subplot(1, len(display_list), 1)
+    plt.title(title[0])
+    plt.imshow(tf.keras.preprocessing.image.array_to_img(display_list[0]))
+    plt.axis("off")
+    for i in range(1, len(display_list)):
+        plt.subplot(1, len(display_list), i+1)
+        plt.title(title[i])
+        plt.imshow(tf.keras.preprocessing.image.array_to_img(display_list[i]),\
+                                                             scale = False),
+                   interpolation = "nearest",
+                   cmap = plt.get_cmap("gist_rainbow"),
+                   norm = Normalize(vmin = 0, vmax = N_CLASSES))
+        plt.axis("off")
+    plt.savefig(dir_out("Test" + str(x) + ".png"))
+    print("Test image: " + str(x))
+
+if "train_generator" in globals():
+    sample_image, sample_mask = next(val_generator)
+else:
+    for image, mask in dataset["val"].take(1):
+        sample_image, sample_mask = image, mask
+#display_sample([sample_image[0], sample_mask[0]])
+
+def create_mask(pred_mask: tf.Tensor) -> tf.Tensor:
+    """Return a filter mask with the top 1 predictions
+    only.
+
+    Parameters
+    ----------
+    pred_mask : tf.Tensor
+        A [IMG_SIZE, IMG_SIZE, N_CLASS] tensor. For each pixel we have
+        N_CLASS values (vector) which represents the probability of the pixel
+        being these classes. Example: A pixel with the vector [0.0, 0.0, 1.0]
+        has been predicted class 2 with a probability of 100%.
+
+    Returns
+    -------
+    tf.Tensor
+        A [IMG_SIZE, IMG_SIZE, 1] mask with top 1 predictions
+        for each pixels.
+    """
+    pred_mask = tf.argmax(pred_mask, axis = -1)
+    pred_mask = tf.expand_dims(pred_mask, axis = -1)
+    return pred_mask
+
+def show_predictions(dataset = None, num = 1, i_m = 1):
+    if dataset:
+        for image, mask in dataset.take(num):
+            pred_mask = trained_model.predict(image)
+            display_sample([image[0], true_mask, create_mask(pred_mask)])
+    else:
+        one_img_batch = sample_image[0][tf.newaxis, ...]
+        inference = trained_model.predict(one_img_batch)
+        pred_mask = create_mask(inference)
+        display_sample([sample_image[0], sample_mask[0],
+                        pred_mask[0]], x = i_m)
+
+# Mask and prediction
+for i_n in range(0, 10):
+    if "val_generator" in globals():
+        sample_image, sample_mask = next(val_generator)
+    else:
+        for image, mask in dataset["val"].take(1):
+            sample_image, sample_mask = image, mask
+    show_predictions(i_m = i_n)
+    mask_array = np.array(sample_mask[0])
+    inference = trained_model.predict(np.expand_dims(sample_image[0], axis = 0))
+    pred = create_mask(inference)
+    y_pred, y_true = inference[0], sample_mask[0]
+    print("Mask classes:\n", np.unique(mask_array))
+    print("Predicted classes:\n", np.unique(pred))
