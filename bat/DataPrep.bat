@@ -1,0 +1,1 @@
+py C:\Users\Manuel\Nextcloud\Masterarbeit\py3 -imgd 256

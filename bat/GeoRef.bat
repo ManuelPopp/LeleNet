@@ -1,0 +1,1 @@
+py C:\Users\Manuel\Nextcloud\Masterarbeit\py3\fun\ApproxGeoRef.py "F:\Block_4\Block4_5\Block4_5" "F:\Block_4\Block4_5GeoTIFF"
