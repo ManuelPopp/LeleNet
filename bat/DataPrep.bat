@@ -1,1 +1,1 @@
-py C:\Users\Manuel\Nextcloud\Masterarbeit\py3 -imgd 256
+py C:\Users\Manuel\Nextcloud\Masterarbeit\py3\DataPreparation.py -imgd 256
