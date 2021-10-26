@@ -75,6 +75,11 @@ def parseArguments():
                         help = ("Sampling date of the data" +\
                                 "as MM_YYYY. Default: '03_2021'"),\
                             type = str, default = "03_2021")
+    parser.add_argument("-r", "--r",\
+                        help = ("Resume from checkpoint. Either 'f' (False;" +\
+                                " default), 't' (True), or date of a specif" +\
+                                    "ic training event (folder name)."),\
+                            type = str, default = "f")
     # Parse arguments
     args = parser.parse_args()
     return args
@@ -94,10 +99,11 @@ imgdim = args.imgdim
 ww = args.ww
 wd = args.wd
 year = args.yr
+resume_training = args.r
 
 # case insensitive arguments
-mdl, optmer, xf, yf, wd = mdl.casefold(), optmer.casefold(),\
-    xf.casefold(), yf.casefold(), wd.casefold()
+mdl, optmer, xf, yf, wd, resume_training = mdl.casefold(), optmer.casefold(),\
+    xf.casefold(), yf.casefold(), wd.casefold(), resume_training.casefold()
 
 #### basic settings------------------------------------------------------------
 import platform, sys, datetime, pathlib, os
@@ -151,11 +157,13 @@ def dir_dat(dat_id = None):
         dat_id = dat_id.split(",")
         return os.path.join(wd, "dat", *dat_id)
 
-def dir_out(out_id = None):
-    if out_id == None:
+def dir_out(*out_id):
+    if len(out_id) < 1:
         return os.path.join(wd, "out")
     else:
-        return os.path.join(wd, "out", out_id)
+        out_lst = list(out_id)
+        out_ids = os.path.sep.join(out_lst)
+        return os.path.join(wd, "out", out_ids)
 
 def dir_var(pkl_name = None):
     if pkl_name == None:
@@ -199,7 +207,7 @@ def dir_omk(plot_id = None, myear = None, type_ext = ""):
             return list(pathlib.Path(os.path.join(dir_dat("omk"), myear)) \
                         .glob("**/*" + plot_id + type_ext + ".tif"))
 
-def dir_tls(plot_id = None, myear = None, dset = None):
+def dir_tls(myear = None, dset = None, plot_id = None):
     if plot_id == None:
         if myear == None:
             if dset == None:
@@ -235,6 +243,7 @@ if (args.imgr is None or args.imgc is None) and args.imgd is None:
                 .glob("**/*." + yf))
     im = Image.open(imgs[0])
     w, h = im.size
+    im.close()
 
 # image dimensions
 if args.imgr != args.imgc:
@@ -338,6 +347,15 @@ def load_image_train(datapoint: dict) -> tuple:
     if tf.random.uniform(()) > 0.5:
         input_image = tf.image.flip_left_right(input_image)
         input_mask = tf.image.flip_left_right(input_mask)
+    # more experimental data augmentation
+    if tf.random.uniform(()) > 0.5:
+        input_image = tf.image.flip_up_down(input_image)
+        input_mask = tf.image.flip_up_down(input_mask)
+    input_image = tf.image.random_brightness(input_image, max_delta = 0.2)
+    input_image = tf.image.random_contrast(input_image, lower = 0.0, \
+                                           upper = 0.05)
+    input_image = tf.image.random_saturation(input_image, lower = 0.0, \
+                                           upper = 0.05)
     input_image, input_mask = normalise(input_image, input_mask)
     return input_image, input_mask
 
@@ -381,6 +399,7 @@ def calculate_weights(directory, n_classes):
         classweights[unique.astype(int)] = counts
         weights = ((weights * gravity) + classweights) / (gravity + 1)
         gravity += 1
+        im.close()
     return weights
 
 def estimate_weights(directory, n_classes, N = 500):
@@ -397,10 +416,32 @@ def estimate_weights(directory, n_classes, N = 500):
         classweights[unique.astype(int)] = counts
         weights = ((weights * gravity) + classweights) / (gravity + 1)
         gravity += 1
+        im.close()
     return weights
 
-WEIGHTS = calculate_weights(os.path.dirname(dir_tls(myear = year, dset = "y")),
-                     N_CLASSES)
+import glob, time
+if os.path.isfile(dir_var("weights")):
+    print("Loading class weights...")
+    WEIGHTS, weights_timestamp = get_var("weights")
+    print("Checking class weights timestamp...")
+    latest_mod = max(glob.glob(dir_tls(myear = year, dset = "y") + \
+                               os.path.sep + "*"), key = os.path.getctime)
+    img_mod_timestamp = os.path.getmtime(latest_mod)
+    img_mod_timestamp = datetime.datetime.fromtimestamp(img_mod_timestamp)
+    if weights_timestamp < img_mod_timestamp:
+        print("Weights out of date. Calculating new class weights...")
+        WEIGHTS = calculate_weights(
+            os.path.dirname(dir_tls(myear = year, dset = "y")), N_CLASSES)
+        weights_timestamp = datetime.datetime.now()
+        save_var(variables = [WEIGHTS, weights_timestamp],
+                 name = "weights")
+else:
+    print("Calculating class weights...")
+    WEIGHTS = calculate_weights(os.path.dirname( \
+        dir_tls(myear = year, dset = "y")), N_CLASSES)
+    weights_timestamp = datetime.datetime.now()
+    save_var(variables = [WEIGHTS, weights_timestamp],
+                 name = "weights")
 #WEIGHTS = WEIGHTS**2
 NORMWEIGHTS = WEIGHTS / max(WEIGHTS)
 ### inverse frequency as weights
@@ -570,21 +611,21 @@ elif mod == "mod_FCD":
         The network consist of a downsampling path, where dense blocks and
         transition down are applied, followed
         by an upsampling path where transition up and dense blocks are applied.
-        Skip connections are used between the downsampling path and the upsampling
-        path
-        Each layer is a composite function of BN - ReLU - Conv and the last layer
-        is a softmax layer.
+        Skip connections are used between the downsampling path and the
+        upsampling path
+        Each layer is a composite function of BN - ReLU - Conv and the last
+        layer is a softmax layer.
         :param input_shape: shape of the input batch. Only the first dimension
             (n_channels) is needed
         :param n_classes: number of classes
-        :param n_filters_first_conv: number of filters for the first convolution
-            applied
+        :param n_filters_first_conv: number of filters for the first
+            convolution applied
         :param n_pool: number of pooling layers = number of transition down =
             number of transition up
-        :param growth_rate: number of new feature maps created by each layer in a
-            dense block
-        :param n_layers_per_block: number of layers per block. Can be an int or a
-            list of size 2 * n_pool + 1
+        :param growth_rate: number of new feature maps created by each layer
+            in a dense block
+        :param n_layers_per_block: number of layers per block. Can be an int
+            or a list of size 2 * n_pool + 1
         :param dropout_p: dropout rate applied after each convolution
             (0. for not using)
         """
@@ -648,7 +689,8 @@ elif mod == "mod_FCD":
                 Tiramisu = ks.layers.concatenate([Tiramisu, l])
         
         # output layer; 1x1 convolution, m = number of classes
-        outputz = ks.layers.Conv2D(n_classes, 1, activation = "softmax")(Tiramisu)
+        outputz = ks.layers.Conv2D(n_classes, 1, \
+                                   activation = "softmax")(Tiramisu)
         
         model = tf.keras.Model(inputs = [inputz], outputs = [outputz])
         print(model.summary())
@@ -691,21 +733,22 @@ elif optmer == "sgd":
 elif optmer == "rms":
     optimizer = ks.optimizers.RMSprop(learning_rate = lr_sched, clipnorm = 1)# FC-DenseNet Optim.
 else:
-    print("Invalid argument for op: " + optmer +\
+    print("Invalid argument for op: " + optmer + \
           ". Use 'Adam', 'rms', or 'sgd'.")
 
 # list callbacks
-logdir = os.path.join(dir_out("logs"), datetime.datetime.now() \
-                      .strftime("%y-%m-%d-%H-%M-%S"))
-os.makedirs(logdir)
-os.chdir(logdir)
+now = datetime.datetime.now()
+logdir = os.path.join(dir_out("logs"), now.strftime("%y-%m-%d-%H-%M-%S"))
+cptdir = os.path.join(dir_out("cpts"), now.strftime("%y-%m-%d-%H-%M-%S"))
+
 cllbs = [
     #ks.callbacks.ReduceLROnPlateau(monitor = "val_loss", factor = 0.2,
     #                               patience = 5, min_lr = 0.001),
     ks.callbacks.EarlyStopping(patience = es_patience),
-    ks.callbacks.ModelCheckpoint(dir_out("Checkpoint.h5"),
+    ks.callbacks.ModelCheckpoint(os.path.join(cptdir, \
+                                              "Epoch.{epoch:02d}.hdf5"),
                                  save_best_only = True),
-    ks.callbacks.TensorBoard(log_dir = logdir)
+    ks.callbacks.TensorBoard(log_dir = logdir, histogram_freq = 5)
     ]
 
 # compile model----------------------------------------------------------------
@@ -745,31 +788,72 @@ class UpdatedMeanIoU(tf.keras.metrics.MeanIoU):
         super(UpdatedMeanIoU, self).__init__(num_classes = num_classes,
                                              name = name, dtype = dtype)
 
-  def update_state(self, y_true, y_pred, sample_weight = None):
-    y_pred = tf.math.argmax(y_pred, axis = -1)
-    return super().update_state(y_true, y_pred, sample_weight)
+    def update_state(self, y_true, y_pred, sample_weight = None):
+        y_pred = tf.math.argmax(y_pred, axis = -1)
+        return super().update_state(y_true, y_pred, sample_weight)
 mIoU = UpdatedMeanIoU(num_classes = N_CLASSES)
 #mIoU = ks.metrics.MeanIoU(num_classes = N_CLASSES)
 
 #lozz = wcc_loss
 #run_opts = tf.compat.v1.RunOptions(report_tensor_allocations_upon_oom = True)
-model.compile(optimizer = optimizer, loss = lozz,
-              metrics = [mIoU#, "sparse_categorical_accuracy"
-                         ])#, options = run_opts)
-model.summary()
+
+# resume training or compile new model-----------------------------------------
+if resume_training == "f":
+    os.makedirs(logdir, exist_ok = True)
+    os.makedirs(cptdir, exist_ok = True)
+    os.chdir(logdir)
+    model.compile(optimizer = optimizer, loss = lozz,
+                  metrics = [mIoU#, "sparse_categorical_accuracy"
+                             ])#, options = run_opts)
+    model.summary()
+elif resume_training == "t":
+    cpt_folders = [f for f in os.listdir(dir_out("cpts")) \
+                   if not f.startswith(".")]
+    cpt_dates = [datetime.datetime.strptime(d, "%y-%m-%d-%H-%M-%S"\
+                                            ) for d in cpt_folders]
+    cpt_folder = max(cpt_dates).strftime("%y-%m-%d-%H-%M-%S")
+else:
+    cpt_folder = resume_training
+
+if resume_training != "f":
+    list_of_files = glob.glob(dir_out("cpts", cpt_folder) + os.path.sep + \
+                              "*" + ".hdf5")
+    checkpoint = max(list_of_files, key = os.path.getctime)
+    try:
+        model = ks.models.load_model(checkpoint, \
+                                     custom_objects = {"UpdatedMeanIoU": mIoU})
+    except:
+        print("Failed to load model from", checkpoint)
+    all_logs = [dir_out("logs", p) for p in os.listdir(dir_out("logs"))]
+    logdir =  max(all_logs, key = os.path.getctime)
+    os.chdir(logdir)
+    model.compile(optimizer = optimizer, loss = lozz,
+                  metrics = [mIoU#, "sparse_categorical_accuracy"
+                             ])
 
 # fit model--------------------------------------------------------------------
+args_fit = {"epochs" : epochz,
+            "steps_per_epoch" : np.ceil(N_img/bs),
+            "validation_steps" : np.ceil(N_val/bs),
+            "callbacks" : cllbs}
+if resume_training != "f":
+    try:
+        s = checkpoint.find("Epoch.") + len("Epoch.")
+        e = checkpoint.find("Epoch.") + len("Epoch.") + 2
+        args_fit["initial_epoch"] = int(checkpoint[s : e])
+    except:
+        print("Error when trying to retreive the epoch number from filename", \
+              "'" + checkpoint + "': Unable to find integer at position", \
+                  str(checkpoint.find("Epoch.") + len("Epoch.")), "to", \
+                      str(len(checkpoint)-5))
 if "train_generator" in locals() or "train_generator" in globals():
-    model.fit(train_generator, epochs = epochz, steps_per_epoch = np.ceil(N_img/bs),
+    model.fit(train_generator,
                      validation_data = val_generator,
-                     validation_steps = np.ceil(N_val/bs),
-                     callbacks = cllbs)
+                     **args_fit)
 else:     
     model.fit(dataset["train"].map(add_sample_weights),
-                     epochs = epochz, steps_per_epoch = np.ceil(N_img/bs),
                      validation_data = dataset["val"],
-                     validation_steps = np.ceil(N_val/bs),
-                     callbacks = cllbs)
+                     **args_fit)
 
 os.chdir(dir_out())
 
@@ -778,89 +862,5 @@ os.makedirs(dir_out(mod), exist_ok = True)
 model.save(dir_out(mod), save_format = "tf", save_traces = True)
 print("Model saved to disc.")
 
-##############################################################################
-##############################################################################
-##############################################################################
-trained_model = ks.models.load_model(dir_out(mod),\
-                                     custom_objects = {"UpdatedMeanIoU": mIoU})
-from matplotlib import pyplot as plt
-from matplotlib.colors import Normalize
-import numpy as np
-def display_sample(display_list, x = 0):
-    """Show side-by-side an input image,
-    the ground truth and the prediction.
-    """
-    plt.figure(figsize = (18, 18))
-
-    title = ["Input Image", "True Mask", "Predicted Mask"]
-    plt.subplot(1, len(display_list), 1)
-    plt.title(title[0])
-    plt.imshow(tf.keras.preprocessing.image.array_to_img(display_list[0]))
-    plt.axis("off")
-    for i in range(1, len(display_list)):
-        plt.subplot(1, len(display_list), i+1)
-        plt.title(title[i])
-        plt.imshow(tf.keras.preprocessing.image.array_to_img(display_list[i]),\
-                                                             scale = False),
-                   interpolation = "nearest",
-                   cmap = plt.get_cmap("gist_rainbow"),
-                   norm = Normalize(vmin = 0, vmax = N_CLASSES))
-        plt.axis("off")
-    plt.savefig(dir_out("Test" + str(x) + ".png"))
-    print("Test image: " + str(x))
-
-if "train_generator" in globals():
-    sample_image, sample_mask = next(val_generator)
-else:
-    for image, mask in dataset["val"].take(1):
-        sample_image, sample_mask = image, mask
-#display_sample([sample_image[0], sample_mask[0]])
-
-def create_mask(pred_mask: tf.Tensor) -> tf.Tensor:
-    """Return a filter mask with the top 1 predictions
-    only.
-
-    Parameters
-    ----------
-    pred_mask : tf.Tensor
-        A [IMG_SIZE, IMG_SIZE, N_CLASS] tensor. For each pixel we have
-        N_CLASS values (vector) which represents the probability of the pixel
-        being these classes. Example: A pixel with the vector [0.0, 0.0, 1.0]
-        has been predicted class 2 with a probability of 100%.
-
-    Returns
-    -------
-    tf.Tensor
-        A [IMG_SIZE, IMG_SIZE, 1] mask with top 1 predictions
-        for each pixels.
-    """
-    pred_mask = tf.argmax(pred_mask, axis = -1)
-    pred_mask = tf.expand_dims(pred_mask, axis = -1)
-    return pred_mask
-
-def show_predictions(dataset = None, num = 1, i_m = 1):
-    if dataset:
-        for image, mask in dataset.take(num):
-            pred_mask = trained_model.predict(image)
-            display_sample([image[0], true_mask, create_mask(pred_mask)])
-    else:
-        one_img_batch = sample_image[0][tf.newaxis, ...]
-        inference = trained_model.predict(one_img_batch)
-        pred_mask = create_mask(inference)
-        display_sample([sample_image[0], sample_mask[0],
-                        pred_mask[0]], x = i_m)
-
-# Mask and prediction
-for i_n in range(0, 10):
-    if "val_generator" in globals():
-        sample_image, sample_mask = next(val_generator)
-    else:
-        for image, mask in dataset["val"].take(1):
-            sample_image, sample_mask = image, mask
-    show_predictions(i_m = i_n)
-    mask_array = np.array(sample_mask[0])
-    inference = trained_model.predict(np.expand_dims(sample_image[0], axis = 0))
-    pred = create_mask(inference)
-    y_pred, y_true = inference[0], sample_mask[0]
-    print("Mask classes:\n", np.unique(mask_array))
-    print("Predicted classes:\n", np.unique(pred))
+#trained_model = ks.models.load_model(dir_out(mod),\
+#                                     custom_objects = {"UpdatedMeanIoU": mIoU})
