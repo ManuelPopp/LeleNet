@@ -65,9 +65,12 @@ def parseArguments():
                         help = "X image dimensions (colours).", type = int,\
                             default = 3)
     parser.add_argument("-ww", "--ww",\
-                        help = ("Weights exponent. Inverse weights =" +\
-                            "1/(weights**ww)"), type = float,\
-                            default = 0.5)
+                        help = ("Weights scaling factor. Inverse weights =" +\
+                            "1/(weights**ww) or 1/math.log(weights, ww)"), \
+                            type = float, default = 0.5)
+    parser.add_argument("-ws", "--ws",\
+                        help = ("Weight scaling (either 'exp' or 'log'."), \
+                            type = str, default = "exp")
     parser.add_argument("-wd", "--wd",\
                         help = "Alternative working directory.", type = str,\
                             default = "")
@@ -97,6 +100,7 @@ xf = args.xf
 yf = args.yf
 imgdim = args.imgdim
 ww = args.ww
+ws = args.ws
 wd = args.wd
 year = args.yr
 resume_training = args.r
@@ -272,8 +276,8 @@ group_species = False
 # exec(open("A1_DataPreparation.py").read())
 
 ## load information generated during data preparation--------------------------
-classes, classes_decoded, NoDataValue, no_data_class = get_var("ClassIDs")
-N_CLASSES = len(classes) if no_data_class else len(classes) + 1
+classes, classes_decoded, NoDataValue, no_data_class, abc = get_var("ClassIDs")
+N_CLASSES = len(classes) if no_data_class or abc else len(classes) + 1
 
 # Setup for training-----------------------------------------------------------
 os.chdir(os.path.join(wd, "py3"))
@@ -348,14 +352,14 @@ def load_image_train(datapoint: dict) -> tuple:
         input_image = tf.image.flip_left_right(input_image)
         input_mask = tf.image.flip_left_right(input_mask)
     # more experimental data augmentation
-    if tf.random.uniform(()) > 0.5:
-        input_image = tf.image.flip_up_down(input_image)
-        input_mask = tf.image.flip_up_down(input_mask)
-    input_image = tf.image.random_brightness(input_image, max_delta = 0.2)
-    input_image = tf.image.random_contrast(input_image, lower = 0.0, \
-                                           upper = 0.05)
-    input_image = tf.image.random_saturation(input_image, lower = 0.0, \
-                                           upper = 0.05)
+#    if tf.random.uniform(()) > 0.5:
+#        input_image = tf.image.flip_up_down(input_image)
+#        input_mask = tf.image.flip_up_down(input_mask)
+#    input_image = tf.image.random_brightness(input_image, max_delta = 0.2)
+#    input_image = tf.image.random_contrast(input_image, lower = 0.0, \
+#                                           upper = 0.05)
+#    input_image = tf.image.random_saturation(input_image, lower = 0.0, \
+#                                           upper = 0.05)
     input_image, input_mask = normalise(input_image, input_mask)
     return input_image, input_mask
 
@@ -386,7 +390,7 @@ dataset["val"] = dataset["val"].prefetch(buffer_size = AUTOTUNE)
 print(dataset["train"])
 print(dataset["val"])
 
-# define weighted categorical crossentropy loss function-----------------------
+# define weighs for categorical crossentropy loss function---------------------
 def calculate_weights(directory, n_classes):
     imgs = list(pathlib.Path(directory).glob("**/*." + yf))
     weights = np.array([0] * n_classes)
@@ -442,12 +446,15 @@ else:
     weights_timestamp = datetime.datetime.now()
     save_var(variables = [WEIGHTS, weights_timestamp],
                  name = "weights")
-#WEIGHTS = WEIGHTS**2
 NORMWEIGHTS = WEIGHTS / max(WEIGHTS)
 ### inverse frequency as weights
 #inv_weights = tf.constant((1 / (WEIGHTS + 0.01)), dtype = tf.float32,
 #                          shape = [1, 1, 1, N_CLASSES])
-inv_weights = 1 / (NORMWEIGHTS + 0.01)**(ww)
+import math
+inv_weights = (1 / (NORMWEIGHTS + 0.01)**(ww)) if ws == "exp" else \
+    [1 / math.log(nw, ww) for nw in NORMWEIGHTS]
+inv_weights = inv_weights / max(inv_weights)
+print("Calculated the following weights:", inv_weights)
 
 ## add weights-----------------------------------------------------------------
 def add_sample_weights(image, segmentation_mask):
@@ -460,7 +467,7 @@ def add_sample_weights(image, segmentation_mask):
 dataset["train"].map(add_sample_weights).element_spec
 
 ##############################################################################
-def wcc_loss(y_true, y_pred, n_classes = N_CLASSES, w = inv_weights):
+#def wcc_loss(y_true, y_pred, n_classes = N_CLASSES, w = inv_weights):
     # one-hot-encode mask (not needed for sparse cce)
     #onehot = tf.one_hot(indices = tf.cast(y_true, dtype = tf.uint8),
     #                    depth = n_classes)
@@ -472,21 +479,22 @@ def wcc_loss(y_true, y_pred, n_classes = N_CLASSES, w = inv_weights):
     #                               1 - tf.keras.backend.epsilon())
     # scale weights so they sum up to 1
     #w = w / tf.keras.backend.sum(y_pred, axis = -1, keepdims = True)
-    y_true = tf.cast(y_true, tf.int32)
-    if len(y_pred.shape) == len(y_true.shape):
-        y_true = tf.squeeze(y_true, [-1])
-    w = tf.cast(w, y_pred.dtype)
+#    y_true = tf.cast(y_true, tf.int32)
+#    if len(y_pred.shape) == len(y_true.shape):
+#        y_true = tf.squeeze(y_true, [-1])
+#    w = tf.cast(w, y_pred.dtype)
     # calculate loss
     #wloss = tf.squeeze(onehot) * tf.keras.backend.log(y_pred) * w
-    scce_loss = ks.losses.SparseCategoricalCrossentropy(y_true, y_pred)
-    wloss = tf.math.divide_no_nan(tf.reduce_sum(scce_loss * w),
-                                  tf.reduce_sum(w))
-    return wloss
+#    scce_loss = ks.losses.SparseCategoricalCrossentropy(y_true, y_pred)
+#    wloss = tf.math.divide_no_nan(tf.reduce_sum(scce_loss * w),
+#                                  tf.reduce_sum(w))
+#    return wloss
 
 # Get model--------------------------------------------------------------------
 os.chdir(os.path.join(wd, "py3"))
 if mod == "mod_UNet":
-    def UNet(n_classes, input_shape = (imgr, imgc, imgdim), dropout = 0.2,
+    def UNet(n_classes, input_shape = (imgr, imgc, imgdim), dropout = 0.5, \
+             filters = 64, \
          ops = {"activation" : "relu",
                 "padding" : "same",
                 "kernel_initializer" : "he_normal"
@@ -496,77 +504,79 @@ if mod == "mod_UNet":
         
         # encoder part
         ## 1st convolution
-        c1 = ks.layers.Conv2D(64, (3, 3), **ops)(inputz)
-        c1 = ks.layers.Conv2D(64, (3, 3), **ops)(c1)
+        c1 = ks.layers.Conv2D(filters, (3, 3), **ops)(inputz)
+        c1 = ks.layers.Conv2D(filters, (3, 3), **ops)(c1)
         ## 1st max pooling
         p1 = ks.layers.MaxPooling2D(pool_size = (2, 2))(c1)
         
         ## 2nd convolution
-        c2 = ks.layers.Conv2D(128, (3, 3), **ops)(p1)
-        c2 = ks.layers.Conv2D(128, (3, 3), **ops)(c2)
+        c2 = ks.layers.Conv2D(filters*2, (3, 3), **ops)(p1)
+        c2 = ks.layers.Conv2D(filters*2, (3, 3), **ops)(c2)
         ## 2nd max pooling
         p2 = ks.layers.MaxPooling2D(pool_size = (2, 2))(c2)
         
         ## 3rd convolution
-        c3 = ks.layers.Conv2D(256, (3, 3), **ops)(p2)
-        c3 = ks.layers.Conv2D(256, (3, 3), **ops)(c3)
+        c3 = ks.layers.Conv2D(filters*4, (3, 3), **ops)(p2)
+        c3 = ks.layers.Conv2D(filters*4, (3, 3), **ops)(c3)
         ## 3rd max pooling
         p3 = ks.layers.MaxPooling2D(pool_size = (2, 2))(c3)
         
         ## 4th convolution
-        c4 = ks.layers.Conv2D(512, (3, 3), **ops)(p3)
-        c4 = ks.layers.Conv2D(512, (3, 3), **ops)(c4)
+        c4 = ks.layers.Conv2D(filters*8, (3, 3), **ops)(p3)
+        c4 = ks.layers.Conv2D(filters*8, (3, 3), **ops)(c4)
         ## Drop
         d4 = ks.layers.Dropout(dropout)(c4)
         ## 4th max pooling
         p4 = ks.layers.MaxPooling2D(pool_size = (2, 2))(d4)
         
         ## 5th convolution
-        c5 = ks.layers.Conv2D(1024, (3, 3), **ops)(p4)
-        c5 = ks.layers.Conv2D(1024, (3, 3), **ops)(c5)
+        c5 = ks.layers.Conv2D(filters*16, (3, 3), **ops)(p4)
+        c5 = ks.layers.Conv2D(filters*16, (3, 3), **ops)(c5)
         ## Drop
         d5 = ks.layers.Dropout(dropout)(c5)
         
         # decoder part
         ## 1st up convolution
         us6 = ks.layers.UpSampling2D(size = (2, 2))(d5)
-        up6 = ks.layers.Conv2D(512, (2, 2), **ops)(us6)
+        up6 = ks.layers.Conv2D(filters*8, (2, 2), **ops)(us6)
         ## merge
         ct6 = ks.layers.concatenate([d4, up6], axis = 3)
-        uc6 = ks.layers.Conv2D(512, (3, 3), **ops)(ct6)
-        uc6 = ks.layers.Conv2D(512, (3, 3), **ops)(uc6)
+        uc6 = ks.layers.Conv2D(filters*8, (3, 3), **ops)(ct6)
+        uc6 = ks.layers.Conv2D(filters*8, (3, 3), **ops)(uc6)
         
         ## 2nd up convolution
         us7 = ks.layers.UpSampling2D(size = (2, 2))(uc6)
-        up7 = ks.layers.Conv2D(256, (2, 2), **ops)(us7)
+        up7 = ks.layers.Conv2D(filters*4, (2, 2), **ops)(us7)
         ## merge
         ct7 = ks.layers.concatenate([c3, up7], axis = 3)
-        uc7 = ks.layers.Conv2D(256, (3, 3), **ops)(ct7)
-        uc7 = ks.layers.Conv2D(256, (2, 2), **ops)(uc7)
+        uc7 = ks.layers.Conv2D(filters*4, (3, 3), **ops)(ct7)
+        uc7 = ks.layers.Conv2D(filters*4, (2, 2), **ops)(uc7)
          
         ## 3rd up convolution
         us8 = ks.layers.UpSampling2D(size = (2, 2))(uc7)
-        up8 = ks.layers.Conv2D(128, (2, 2), **ops)(us8)
+        up8 = ks.layers.Conv2D(filters*2, (2, 2), **ops)(us8)
         ## merge
         ct8 = ks.layers.concatenate([c2, up8], axis = 3)
-        uc8 = ks.layers.Conv2D(128, (3, 3), **ops)(ct8)
-        uc8 = ks.layers.Conv2D(128, (3, 3), **ops)(uc8)
+        uc8 = ks.layers.Conv2D(filters*2, (3, 3), **ops)(ct8)
+        uc8 = ks.layers.Conv2D(filters*2, (3, 3), **ops)(uc8)
          
         ## 4th up convolution
         us9 = ks.layers.UpSampling2D(size = (2, 2))(uc8)
-        up9 = ks.layers.Conv2D(64, (2, 2), **ops)(us9)
+        up9 = ks.layers.Conv2D(filters, (2, 2), **ops)(us9)
         ## merge
         ct9 = ks.layers.concatenate([c1, up9], axis = 3)
-        uc9 = ks.layers.Conv2D(64, (3, 3), **ops)(ct9)
-        uc9 = ks.layers.Conv2D(64, (3, 3), **ops)(uc9)
+        uc9 = ks.layers.Conv2D(filters, (3, 3), **ops)(ct9)
+        uc9 = ks.layers.Conv2D(filters, (3, 3), **ops)(uc9)
         uc9 = ks.layers.Conv2D(2, (3, 3), **ops)(uc9)
         
         # output layer
         if n_classes > 2:
+            n_out =  n_classes
             activ = "softmax"
         else:
+            n_out = 1
             activ = "sigmoid"
-        outputz = ks.layers.Conv2D(n_classes, 1, activation = activ)(uc9)
+        outputz = ks.layers.Conv2D(n_out, 1, activation = activ)(uc9)
     
         model = ks.Model(inputs = [inputz], outputs = [outputz])
         print(model.summary())
@@ -689,8 +699,14 @@ elif mod == "mod_FCD":
                 Tiramisu = ks.layers.concatenate([Tiramisu, l])
         
         # output layer; 1x1 convolution, m = number of classes
-        outputz = ks.layers.Conv2D(n_classes, 1, \
-                                   activation = "softmax")(Tiramisu)
+        if n_classes > 2:
+            n_out = n_classes
+            activ = "softmax"
+        else:
+            n_out = 1
+            activ = "sigmoid"
+        outputz = ks.layers.Conv2D(n_out, 1, \
+                                   activation = activ)(Tiramisu)
         
         model = tf.keras.Model(inputs = [inputz], outputs = [outputz])
         print(model.summary())
@@ -715,7 +731,7 @@ def step_decay_schedule(initial_lr = 1e-3,
         return initial_lr * (decay_factor ** np.floor(epoch/step_size))
     
     return LearningRateScheduler(schedule)
-lr_sched = step_decay_schedule(initial_lr = 1e-3,
+lr_sched = step_decay_schedule(initial_lr = init_lr,
                                decay_factor = 0.995, step_size = 2)
 '''
 Using some simple built-in learning rate decay:
