@@ -10,22 +10,8 @@ runfrom terminal: python ~/LeleNet/py3/LeleNet_trn.py "U-Net" 10 40
 __author__ = "Manuel R. Popp"
 
 #### parse arguments-----------------------------------------------------------
-# Standard settings for testing
-if False:
-    xf = "png"
-    yf = "png"
-    imgr = 256
-    imgc = 256
-    imgdim = 3
-    wd = "home"
-    mdl = "UNet"
-    bs = 1
-    epochz = 3
-    year = "03_2021"
-    optmer = "rms"
-
 # Import arguments
-import argparse
+import argparse, pickle
 
 def parseArguments():
     parser = argparse.ArgumentParser()
@@ -39,13 +25,25 @@ def parseArguments():
     # Optional arguments
     parser.add_argument("-lr", "--lr",\
                         help = "Initial learning rate (float).",\
-                            type = float, default = 1e-3)
+                            type = float, default = 1e-4)
+    parser.add_argument("-lrd", "--lrd",\
+                        help = "Learning rate decay factor (float).",\
+                            type = float, default = 0.95)
+    parser.add_argument("-lrs", "--lrs",\
+                        help = "Learning rate decay step size (int).",\
+                            type = int, default = 2)
     parser.add_argument("-esp", "--esp",\
                         help = "Early stopping patience (int).",\
                             type = int, default = None)
     parser.add_argument("-op", "--op",\
                         help = "Optimizer. 'Adam', 'rms', or 'sgd'.",\
                             type = str, default = "rms")
+    parser.add_argument("-ki", "--ki",\
+                        help = "Kernel initialiser.",\
+                            type = str, default = None)
+    parser.add_argument("-do", "--do",\
+                        help = "Dropout rate.",\
+                            type = float, default = 0.1)
     parser.add_argument("-xf", "--xf",\
                         help = "Image format; either png, jpg, or tif.",\
                             type = str, default = "png")
@@ -64,10 +62,13 @@ def parseArguments():
     parser.add_argument("-imgdim", "--imgdim",\
                         help = "X image dimensions (colours).", type = int,\
                             default = 3)
+    parser.add_argument("-nc", "--nc",\
+                        help = "Number of classes.", type = int,\
+                            default = None)
     parser.add_argument("-ww", "--ww",\
                         help = ("Weights scaling factor. Inverse weights =" +\
                             "1/(weights**ww) or 1/math.log(weights, ww)"), \
-                            type = float, default = 0.5)
+                            type = float, default = 0.0)
     parser.add_argument("-ws", "--ws",\
                         help = ("Weight scaling (either 'exp' or 'log'."), \
                             type = str, default = "exp")
@@ -83,6 +84,9 @@ def parseArguments():
                                 " default), 't' (True), or date of a specif" +\
                                     "ic training event (folder name)."),\
                             type = str, default = "f")
+    parser.add_argument("-save_settings", "--sv",\
+                        help = "Save training settings.", type = bool,\
+                            default = True)
     # Parse arguments
     args = parser.parse_args()
     return args
@@ -90,12 +94,24 @@ if __name__ == "__main__":
     # Parse the arguments
     args = parseArguments()
 
+# debug mode
+if False:
+    import pickle
+    saved_args = "C:\\Users\\Manuel\\Nextcloud\\Masterarbeit\\py3\\vrs\\train_settings.pkl"
+    with open(saved_args, "rb") as f:
+        args = pickle.load(f)
+    args.wd = "home"
+
 mdl = args.model
 bs = args.bs
 epochz = args.ep
 init_lr = args.lr
+decay_lr = args.lrd
+step_lr = args.lrs
 es_patience = args.esp if args.esp is not None else epochz
 optmer = args.op
+kernel_init = args.ki
+drop = args.do
 xf = args.xf
 yf = args.yf
 imgdim = args.imgdim
@@ -176,13 +192,11 @@ def dir_var(pkl_name = None):
         return os.path.join(wd, "py3", "vrs", pkl_name + ".pkl")
 
 def save_var(variables, name):
-    import pickle
     os.makedirs(dir_var(), exist_ok = True)
     with open(dir_var(pkl_name = name), "wb") as f:
         pickle.dump(variables, f)
 
 def get_var(name):
-    import pickle
     with open(dir_var(pkl_name = name), "rb") as f:
         return pickle.load(f)
     
@@ -194,6 +208,10 @@ with open(dir_out("System_info.txt"), "w") as f:
             py_version + "\nTensorflow version: " + tf.__version__ +
             "\nUTC time (start): " + str(t_start) +
             "\nLocal time (start): " + str(datetime.datetime.now()))
+
+if args.sv:
+    save_var(args, "train_settings")
+    print("Saved training settings.")
 
 #### data preparation directory functions--------------------------------------
 def dir_omk(plot_id = None, myear = None, type_ext = ""):
@@ -235,6 +253,18 @@ def dir_tls(myear = None, dset = None, plot_id = None):
                                 "Returning tile directory.")
             else:
                 return os.path.join(dir_dat("tls"), myear, dset, "0", plot_id)
+
+def save_dataset_info(variables, year = year, name = "dset_info"):
+    tile_dir = dir_tls(myear = year)
+    os.makedirs(tile_dir, exist_ok = True)
+    with open(tile_dir + os.path.sep + name + ".pkl", "wb") as f:
+        pickle.dump(variables, f)
+
+def get_dataset_info(year = year, name = "dset_info"):
+    tile_dir = dir_tls(myear = year)
+    with open(tile_dir + os.path.sep + name + ".pkl", "rb") as f:
+        return pickle.load(f)
+
 def toINT(filename):
     imgINT = filename.astype("uint8")
     return imgINT
@@ -272,12 +302,14 @@ if args.imgd is not None:
 import pandas as pd
 specdict = pd.read_excel(dir_dat("xls,SpeciesList.xlsx"),
                          sheet_name = "Dictionary", header = 0)
-group_species = False
 # exec(open("A1_DataPreparation.py").read())
 
 ## load information generated during data preparation--------------------------
-classes, classes_decoded, NoDataValue, no_data_class, abc = get_var("ClassIDs")
+classes, classes_decoded, NoDataValue, no_data_class, abc = get_dataset_info()
 N_CLASSES = len(classes) if no_data_class or abc else len(classes) + 1
+
+if args.nc is not None:
+    N_CLASSES = args.nc
 
 # Setup for training-----------------------------------------------------------
 os.chdir(os.path.join(wd, "py3"))
@@ -313,35 +345,44 @@ zeed = 42
 def parse_image(img_path: str) -> dict:
     # read image
     image = tf.io.read_file(img_path)
-    #image = tfio.experimental.image.decode_tiff(image)
     if xf == "png":
         image = tf.image.decode_png(image, channels = 3)
-    else:
+    elif xf == "jpg":
         image = tf.image.decode_jpeg(image, channels = 3)
-    image = tf.image.convert_image_dtype(image, tf.uint8)
-    #image = image[:, :, :-1]
+    elif xf == "tif":
+        import tensorflow_io as tfio
+        image = tfio.experimental.image.decode_tiff(image)
+    else:
+        print("Invalid X data format. Allowed formats: png, jpg, tif")
     # read mask
     mask_path = tf.strings.regex_replace(img_path, "X", "y")
     mask_path = tf.strings.regex_replace(mask_path, "X." + xf, "y." + yf)
+    mask_path = tf.strings.regex_replace(mask_path, "image", "mask")
     mask = tf.io.read_file(mask_path)
-    #mask = tfio.experimental.image.decode_tiff(mask)
-    mask = tf.image.decode_png(mask, channels = 1)
-    #mask = mask[:, :, :-1]
+    if yf == "png":
+        mask = tf.image.decode_png(mask, channels = 1)
+    elif yf == "tif":
+        import tensorflow_io as tfio
+        mask = tfio.experimental.image.decode_tiff(mask)
+    else:
+        print("Invalid y data format. Allowed formats: png, tif")
     mask = tf.where(mask == 255, np.dtype("uint8").type(NoDataValue), mask)
     return {"image": image, "segmentation_mask": mask}
 
 train_dataset = tf.data.Dataset.list_files(
-    dir_tls(myear = year, dset = "X") + "/*." + xf, seed = zeed)
+    dir_tls(myear = year, dset = "X") + os.path.sep + "*." + xf, seed = zeed)
 train_dataset = train_dataset.map(parse_image)
 
 val_dataset = tf.data.Dataset.list_files(
-    dir_tls(myear = year, dset = "X_val") + "/*." + xf, seed = zeed)
+    dir_tls(myear = year, dset = "X_val") + os.path.sep + "*." + xf, seed = zeed)
 val_dataset = val_dataset.map(parse_image)
 
 ## data transformations--------------------------------------------------------
 @tf.function
 def normalise(input_image: tf.Tensor, input_mask: tf.Tensor) -> tuple:
     input_image = tf.cast(input_image, tf.float32) / 255.0
+    input_mask = tf.round(input_mask)
+    input_mask = tf.cast(input_mask, tf.uint8)
     return input_image, input_mask
 
 @tf.function
@@ -352,14 +393,16 @@ def load_image_train(datapoint: dict) -> tuple:
         input_image = tf.image.flip_left_right(input_image)
         input_mask = tf.image.flip_left_right(input_mask)
     # more experimental data augmentation
-#    if tf.random.uniform(()) > 0.5:
-#        input_image = tf.image.flip_up_down(input_image)
-#        input_mask = tf.image.flip_up_down(input_mask)
-#    input_image = tf.image.random_brightness(input_image, max_delta = 0.2)
-#    input_image = tf.image.random_contrast(input_image, lower = 0.0, \
-#                                           upper = 0.05)
-#    input_image = tf.image.random_saturation(input_image, lower = 0.0, \
-#                                           upper = 0.05)
+    '''
+    if tf.random.uniform(()) > 0.5:
+        input_image = tf.image.flip_up_down(input_image)
+        input_mask = tf.image.flip_up_down(input_mask)
+    input_image = tf.image.random_brightness(input_image, max_delta = 0.2)
+    input_image = tf.image.random_contrast(input_image, lower = 0.0, \
+                                           upper = 0.05)
+    input_image = tf.image.random_saturation(input_image, lower = 0.0, \
+                                           upper = 0.05)
+    '''
     input_image, input_mask = normalise(input_image, input_mask)
     return input_image, input_mask
 
@@ -373,7 +416,7 @@ def load_image_test(datapoint: dict) -> tuple:
 ## create datasets-------------------------------------------------------------
 buff_size = 1000
 dataset = {"train": train_dataset, "val": val_dataset}
-# -- Train Dataset --#
+# train dataset
 dataset["train"] = dataset["train"]\
     .map(load_image_train, num_parallel_calls = tf.data.experimental.AUTOTUNE)
 dataset["train"] = dataset["train"].shuffle(buffer_size = buff_size,
@@ -381,7 +424,7 @@ dataset["train"] = dataset["train"].shuffle(buffer_size = buff_size,
 dataset["train"] = dataset["train"].repeat()
 dataset["train"] = dataset["train"].batch(bs)
 dataset["train"] = dataset["train"].prefetch(buffer_size = AUTOTUNE)
-#-- Validation Dataset --#
+# validation dataset
 dataset["val"] = dataset["val"].map(load_image_test)
 dataset["val"] = dataset["val"].repeat()
 dataset["val"] = dataset["val"].batch(bs)
@@ -424,37 +467,38 @@ def estimate_weights(directory, n_classes, N = 500):
     return weights
 
 import glob, time
-if os.path.isfile(dir_var("weights")):
-    print("Loading class weights...")
-    WEIGHTS, weights_timestamp = get_var("weights")
-    print("Checking class weights timestamp...")
-    latest_mod = max(glob.glob(dir_tls(myear = year, dset = "y") + \
-                               os.path.sep + "*"), key = os.path.getctime)
-    img_mod_timestamp = os.path.getmtime(latest_mod)
-    img_mod_timestamp = datetime.datetime.fromtimestamp(img_mod_timestamp)
-    if weights_timestamp < img_mod_timestamp:
-        print("Weights out of date. Calculating new class weights...")
-        WEIGHTS = calculate_weights(
-            os.path.dirname(dir_tls(myear = year, dset = "y")), N_CLASSES)
+if ww != 0:
+    if os.path.isfile(dir_var("weights")):
+        print("Loading class weights...")
+        WEIGHTS, weights_timestamp = get_dataset_info("weights")
+        print("Checking class weights timestamp...")
+        latest_mod = max(glob.glob(dir_tls(myear = year, dset = "y") + \
+                                   os.path.sep + "*"), key = os.path.getctime)
+        img_mod_timestamp = os.path.getmtime(latest_mod)
+        img_mod_timestamp = datetime.datetime.fromtimestamp(img_mod_timestamp)
+        if weights_timestamp < img_mod_timestamp:
+            print("Weights out of date. Calculating new class weights...")
+            WEIGHTS = calculate_weights(
+                os.path.dirname(dir_tls(myear = year, dset = "y")), N_CLASSES)
+            weights_timestamp = datetime.datetime.now()
+            save_dataset_info(variables = [WEIGHTS, weights_timestamp],
+                     name = "weights")
+    else:
+        print("Calculating class weights...")
+        WEIGHTS = calculate_weights(os.path.dirname( \
+            dir_tls(myear = year, dset = "y")), N_CLASSES)
         weights_timestamp = datetime.datetime.now()
-        save_var(variables = [WEIGHTS, weights_timestamp],
-                 name = "weights")
-else:
-    print("Calculating class weights...")
-    WEIGHTS = calculate_weights(os.path.dirname( \
-        dir_tls(myear = year, dset = "y")), N_CLASSES)
-    weights_timestamp = datetime.datetime.now()
-    save_var(variables = [WEIGHTS, weights_timestamp],
-                 name = "weights")
-NORMWEIGHTS = WEIGHTS / max(WEIGHTS)
-### inverse frequency as weights
-#inv_weights = tf.constant((1 / (WEIGHTS + 0.01)), dtype = tf.float32,
-#                          shape = [1, 1, 1, N_CLASSES])
-import math
-inv_weights = (1 / (NORMWEIGHTS + 0.01)**(ww)) if ws == "exp" else \
-    [1 / math.log(nw, ww) for nw in NORMWEIGHTS]
-inv_weights = inv_weights / max(inv_weights)
-print("Calculated the following weights:", inv_weights)
+        save_dataset_info(variables = [WEIGHTS, weights_timestamp],
+                     name = "weights")
+    NORMWEIGHTS = WEIGHTS / max(WEIGHTS)
+    ### inverse frequency as weights
+    #inv_weights = tf.constant((1 / (WEIGHTS + 0.01)), dtype = tf.float32,
+    #                          shape = [1, 1, 1, N_CLASSES])
+    import math
+    inv_weights = (1 / (NORMWEIGHTS + 0.01)**(ww)) if ws == "exp" else \
+        [1 / math.log(nw, ww) for nw in NORMWEIGHTS]
+    inv_weights = inv_weights / max(inv_weights)
+    print("Calculated the following weights:", inv_weights)
 
 ## add weights-----------------------------------------------------------------
 def add_sample_weights(image, segmentation_mask):
@@ -464,40 +508,28 @@ def add_sample_weights(image, segmentation_mask):
                                indices = tf.cast(segmentation_mask, tf.int32))
     return image, segmentation_mask, sample_weights
 
-dataset["train"].map(add_sample_weights).element_spec
-
-##############################################################################
-#def wcc_loss(y_true, y_pred, n_classes = N_CLASSES, w = inv_weights):
-    # one-hot-encode mask (not needed for sparse cce)
-    #onehot = tf.one_hot(indices = tf.cast(y_true, dtype = tf.uint8),
-    #                    depth = n_classes)
-    #y_pred = tf.cast(y_pred, dtype = tf.float32)
-    # divide by sum over last axis to make class probabilities sum up to 1
-    #y_pred = y_pred / tf.keras.backend.sum(y_pred, axis = -1, keepdims = True)
-    # clip to prevent NaN and Inf
-    #y_pred = tf.keras.backend.clip(y_pred, tf.keras.backend.epsilon(),
-    #                               1 - tf.keras.backend.epsilon())
-    # scale weights so they sum up to 1
-    #w = w / tf.keras.backend.sum(y_pred, axis = -1, keepdims = True)
-#    y_true = tf.cast(y_true, tf.int32)
-#    if len(y_pred.shape) == len(y_true.shape):
-#        y_true = tf.squeeze(y_true, [-1])
-#    w = tf.cast(w, y_pred.dtype)
-    # calculate loss
-    #wloss = tf.squeeze(onehot) * tf.keras.backend.log(y_pred) * w
-#    scce_loss = ks.losses.SparseCategoricalCrossentropy(y_true, y_pred)
-#    wloss = tf.math.divide_no_nan(tf.reduce_sum(scce_loss * w),
-#                                  tf.reduce_sum(w))
-#    return wloss
+if ww != 0:
+    dataset["train"].map(add_sample_weights).element_spec
 
 # Get model--------------------------------------------------------------------
 os.chdir(os.path.join(wd, "py3"))
+if kernel_init is not None:
+    k_initializers = { \
+        "he_normal" : "he_normal", \
+        "he_uniform" : "he_uniform", \
+        "random_uniform" : ks.initializers.RandomUniform(minval=0., maxval=1.), \
+        "truncated_normal" : ks.initializers.TruncatedNormal(mean=0.0, \
+                                                             stddev=0.05) \
+            }
+    initializer = k_initializers[kernel_init.casefold()]
 if mod == "mod_UNet":
-    def UNet(n_classes, input_shape = (imgr, imgc, imgdim), dropout = 0.5, \
+    if kernel_init is None:
+        initializer = "he_normal"
+    def UNet(n_classes, input_shape = (imgr, imgc, imgdim), dropout = drop, \
              filters = 64, \
          ops = {"activation" : "relu",
                 "padding" : "same",
-                "kernel_initializer" : "he_normal"
+                "kernel_initializer" : initializer
         }):
         # input layer
         inputz = ks.layers.Input(shape = input_shape)
@@ -571,12 +603,10 @@ if mod == "mod_UNet":
         
         # output layer
         if n_classes > 2:
-            n_out =  n_classes
-            activ = "softmax"
+            outputz = ks.layers.Conv2D(n_classes, (1, 1), \
+                                       activation = "softmax")(uc9)
         else:
-            n_out = 1
-            activ = "sigmoid"
-        outputz = ks.layers.Conv2D(n_out, 1, activation = activ)(uc9)
+            outputz = ks.layers.Conv2D(1, (1, 1), activation = "sigmoid")(uc9)
     
         model = ks.Model(inputs = [inputz], outputs = [outputz])
         print(model.summary())
@@ -589,17 +619,19 @@ if mod == "mod_UNet":
     # directory to save model
     os.makedirs(dir_out("mod_UNet"), exist_ok = True)
 elif mod == "mod_FCD":
-    def BN_ReLU_Conv(inputs, n_filters, filter_size = 3, dropout_p = 0.2):
+    if kernel_init is None:
+        initializer = "he_uniform"
+    def BN_ReLU_Conv(inputs, n_filters, filter_size = 3, dropout_p = drop):
         l = ks.layers.BatchNormalization()(inputs)
         l = ks.layers.Activation("relu")(l)
         l = ks.layers.Conv2D(n_filters, filter_size, activation = None,
                              padding = "same", 
-                             kernel_initializer = 'he_uniform') (l)
+                             kernel_initializer = initializer) (l)
         if dropout_p != 0.0:
             l = ks.layers.Dropout(dropout_p)(l)
         return l
     
-    def TransitionDown(inputs, n_filters, dropout_p = 0.2):
+    def TransitionDown(inputs, n_filters, dropout_p = drop):
         l = BN_ReLU_Conv(inputs, n_filters, filter_size = 1,\
                          dropout_p = dropout_p)
         l = ks.layers.MaxPool2D(pool_size = (2, 2))(l)
@@ -609,13 +641,13 @@ elif mod == "mod_FCD":
         l = ks.layers.concatenate(block_to_upsample)
         l = ks.layers.Conv2DTranspose(n_filters_keep, kernel_size = (3, 3),
                                       strides = (2, 2), padding = "same", 
-                                      kernel_initializer = "he_uniform")(l)
+                                      kernel_initializer = initializer)(l)
         l = ks.layers.concatenate([l, skip_connection])
         return l
     
     def FCDense(n_classes, input_shape = (imgr, imgc, imgdim),
                 n_filters_first_conv = 48, n_pool = 4, growth_rate = 12,
-                n_layers_per_block = 5, dropout_p = 0.2):
+                n_layers_per_block = 5, dropout_p = drop):
         """
         Original note from the authors of the FC-DenseNet:
         The network consist of a downsampling path, where dense blocks and
@@ -655,7 +687,7 @@ elif mod == "mod_FCD":
                                     kernel_size = (3, 3), strides = (1, 1),
                                     padding = "same", dilation_rate = (1, 1),
                                     activation = "relu",
-                                    kernel_initializer = "he_uniform"
+                                    kernel_initializer = initializer
                                     )(inputz)
         n_filters = n_filters_first_conv
         
@@ -666,7 +698,7 @@ elif mod == "mod_FCD":
             ## dense block
             for j in range(n_layers_per_block[i]):
                 ### Compute new feature maps
-                l = BN_ReLU_Conv(Tiramisu, growth_rate, dropout_p=dropout_p)
+                l = BN_ReLU_Conv(Tiramisu, growth_rate, dropout_p = dropout_p)
                 ### and stack it---the Tiramisu is growing
                 Tiramisu = ks.layers.concatenate([Tiramisu, l])
                 n_filters += growth_rate
@@ -700,14 +732,12 @@ elif mod == "mod_FCD":
         
         # output layer; 1x1 convolution, m = number of classes
         if n_classes > 2:
-            n_out = n_classes
-            activ = "softmax"
+            outputz = ks.layers.Conv2D(n_classes, (1, 1), \
+                                   activation = "softmax")(Tiramisu)
         else:
-            n_out = 1
-            activ = "sigmoid"
-        outputz = ks.layers.Conv2D(n_out, 1, \
-                                   activation = activ)(Tiramisu)
-        
+            outputz = ks.layers.Conv2D(1, (1, 1), \
+                                   activation = "sigmoid")(Tiramisu)
+
         model = tf.keras.Model(inputs = [inputz], outputs = [outputz])
         print(model.summary())
         print(f'Total number of layers: {len(model.layers)}')
@@ -725,31 +755,41 @@ from tensorflow.keras.callbacks import LearningRateScheduler
 '''
 Simple custom LR decay which would only require the epoch index as an argument:
 '''
-def step_decay_schedule(initial_lr = 1e-3,
-                        decay_factor = 0.75, step_size = 10):
+def step_decay_schedule(initial_lr = init_lr,
+                        decay_factor = decay_lr, step_size = step_lr):
     def schedule(epoch):
         return initial_lr * (decay_factor ** np.floor(epoch/step_size))
     
     return LearningRateScheduler(schedule)
-lr_sched = step_decay_schedule(initial_lr = init_lr,
-                               decay_factor = 0.995, step_size = 2)
+#lr_sched = step_decay_schedule(initial_lr = init_lr,
+#                               decay_factor = decay_lr, step_size = step_lr)
 '''
 Using some simple built-in learning rate decay:
 '''
-lr_sched = ks.optimizers.schedules.ExponentialDecay(
+if init_lr is not None:
+    lr_sched = ks.optimizers.schedules.ExponentialDecay(
     initial_learning_rate = init_lr,
     # decay after n steps
     decay_steps = np.floor(N_img/bs),
-    decay_rate = 0.95)
-
-if optmer == "adam":
-    optimizer = ks.optimizers.Adam(learning_rate = lr_sched, clipnorm = 1)
-elif optmer == "sgd":
-    optimizer = ks.optimizers.SGD(learning_rate = init_lr, clipnorm = 1)
-elif optmer == "rms":
-    optimizer = ks.optimizers.RMSprop(learning_rate = lr_sched, clipnorm = 1)# FC-DenseNet Optim.
+    decay_rate = decay_lr)
+    optimizers = {
+        "adam" : ks.optimizers.Adam(learning_rate = lr_sched, \
+                                    clipnorm = 1), \
+        "sgd" : ks.optimizers.SGD(learning_rate = init_lr, \
+                                  clipnorm = 1), \
+        "rms" : ks.optimizers.RMSprop(learning_rate = lr_sched, \
+                                      clipnorm = 1)
+        }
 else:
-    print("Invalid argument for op: " + optmer + \
+    optimizers = {
+        "adam" : ks.optimizers.Adam(),
+        "sgd" : ks.optimizers.SGD(),
+        "rms" : ks.optimizers.RMSprop()
+        }
+try:
+    optimizer = optimizers[optmer]
+except:
+    print("Failed to assign optimizer: " + optmer + \
           ". Use 'Adam', 'rms', or 'sgd'.")
 
 # list callbacks
@@ -769,9 +809,21 @@ cllbs = [
 
 # compile model----------------------------------------------------------------
 ## loss functions
+### define IoU loss (only binary)
+#### https://www.youtube.com/watch?v=NqDBvUPD9jg&ab_channel=DigitalSreeni
+#def IoU_coe(y_true, y_pred):
+#    T = ks.flatten(y_true)
+#    P = ks.flatten(y_pred)
+#    intersect = ks.sum(T * P)
+#    IoU = (intersect + 1.0) / (ks.sum(T) + ks.sum(P) - intersect + 1.0)
+#    return IoU
+
+#def IoU_loss(y_true, y_pred):
+#    return 1 - IoU_coe(y_true, y_pred)
+
 ### define dice coefficient
 ### https://github.com/tensorlayer/tensorlayer/blob/master/tensorlayer/cost.py#L216
-def dice_coe(output, target, loss_type = "jaccard",
+def dice_coe(target, output, loss_type = "jaccard",
              axis = (1, 2, 3), smooth = 1):# orig. val. smooth = 1e-5
     inse = tf.reduce_sum(output * target, axis = axis)
     if loss_type == "jaccard":
@@ -784,16 +836,17 @@ def dice_coe(output, target, loss_type = "jaccard",
         raise Exception("Unknow loss_type: " + loss_type)
     dice = (2. * inse + smooth) / (l + r + smooth)
     dice = tf.reduce_mean(dice)
-    return 1 - dice
-lozz = dice_coe
+    return dice
+def dice_loss(y_true, y_pred):
+    return 1 - dice_coe(y_true, y_pred)
 
-### get sparse categorical cross entropy
-lozz = ks.losses.SparseCategoricalCrossentropy() if N_CLASSES > 2 else\
-    ks.losses.BinaryCrossentropy()
+### define focal loss
+# pip3 install focal-loss
 
 ## metrics
 ### get intersect. over union (original function gives error -> updated accor-
 ### ding to https://stackoverflow.com/a/61826074/11611246)
+# mIoU = ks.metrics.MeanIoU(num_classes = N_CLASSES)
 class UpdatedMeanIoU(tf.keras.metrics.MeanIoU):
     def __init__(self,
                  y_true = None,
@@ -808,10 +861,15 @@ class UpdatedMeanIoU(tf.keras.metrics.MeanIoU):
         y_pred = tf.math.argmax(y_pred, axis = -1)
         return super().update_state(y_true, y_pred, sample_weight)
 mIoU = UpdatedMeanIoU(num_classes = N_CLASSES)
-#mIoU = ks.metrics.MeanIoU(num_classes = N_CLASSES)
 
-#lozz = wcc_loss
+### get sparse categorical/binary cross entropy
+lozz = ks.losses.SparseCategoricalCrossentropy() if N_CLASSES > 2 else\
+    ks.losses.BinaryCrossentropy()
+
 #run_opts = tf.compat.v1.RunOptions(report_tensor_allocations_upon_oom = True)
+
+metrix = [mIoU, "sparse_categorical_accuracy"] if N_CLASSES > 2 else \
+    [mIoU, "accuracy"]
 
 # resume training or compile new model-----------------------------------------
 if resume_training == "f":
@@ -819,8 +877,7 @@ if resume_training == "f":
     os.makedirs(cptdir, exist_ok = True)
     os.chdir(logdir)
     model.compile(optimizer = optimizer, loss = lozz,
-                  metrics = [mIoU#, "sparse_categorical_accuracy"
-                             ])#, options = run_opts)
+                  metrics = metrix)#, options = run_opts)
     model.summary()
 elif resume_training == "t":
     cpt_folders = [f for f in os.listdir(dir_out("cpts")) \
@@ -844,8 +901,17 @@ if resume_training != "f":
     logdir =  max(all_logs, key = os.path.getctime)
     os.chdir(logdir)
     model.compile(optimizer = optimizer, loss = lozz,
-                  metrics = [mIoU#, "sparse_categorical_accuracy"
-                             ])
+                  metrics = metrix)
+
+# report to tensorboard--------------------------------------------------------
+import subprocess
+PARAMETERS = "'Batch size: " + str(bs) + " Init. lr: " + str(init_lr) + \
+    " Img dim: " + str(imgc) + " Weights: " + str(ww) + " Optimizer: " + \
+        optmer + " Dataset: " + year +"'"
+subprocess.Popen(["tensorboard", "dev", "upload", "--logdir", logdir, \
+                  "--name", "LeleNet_" + mod, "--description", \
+                      PARAMETERS], shell = False, \
+                 stdout = subprocess.DEVNULL, stderr = subprocess.STDOUT)
 
 # fit model--------------------------------------------------------------------
 args_fit = {"epochs" : epochz,
@@ -866,10 +932,15 @@ if "train_generator" in locals() or "train_generator" in globals():
     model.fit(train_generator,
                      validation_data = val_generator,
                      **args_fit)
-else:     
-    model.fit(dataset["train"].map(add_sample_weights),
-                     validation_data = dataset["val"],
-                     **args_fit)
+else:
+    if ww != 0:
+        model.fit(dataset["train"].map(add_sample_weights),
+                         validation_data = dataset["val"],
+                         **args_fit)
+    else:
+        model.fit(dataset["train"],
+                         validation_data = dataset["val"],
+                         **args_fit)
 
 os.chdir(dir_out())
 
