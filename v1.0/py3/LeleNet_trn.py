@@ -41,7 +41,7 @@ def parseArguments():
     parser.add_argument("-ki", "--ki",\
                         help = "Kernel initialiser.",\
                             type = str, default = None)
-    parser.add_argument("-do", "--do",\
+    parser.add_argument("-dr", "--dr",\
                         help = "Dropout rate.",\
                             type = float, default = 0.1)
     parser.add_argument("-xf", "--xf",\
@@ -65,6 +65,9 @@ def parseArguments():
     parser.add_argument("-nc", "--nc",\
                         help = "Number of classes.", type = int,\
                             default = None)
+    parser.add_argument("-lc", "--lc",\
+                        help = "Lowest class value.", type = int,\
+                            default = 0)
     parser.add_argument("-ww", "--ww",\
                         help = ("Weights scaling factor. Inverse weights =" +\
                             "1/(weights**ww) or 1/math.log(weights, ww)"), \
@@ -72,6 +75,9 @@ def parseArguments():
     parser.add_argument("-ws", "--ws",\
                         help = ("Weight scaling (either 'exp' or 'log'."), \
                             type = str, default = "exp")
+    parser.add_argument("-mx", "--mx",\
+                        help = ("Metric to track; either mIoU or f1."), \
+                            type = str, default = "mIoU")
     parser.add_argument("-wd", "--wd",\
                         help = "Alternative working directory.", type = str,\
                             default = "")
@@ -87,6 +93,15 @@ def parseArguments():
     parser.add_argument("-save_settings", "--sv",\
                         help = "Save training settings.", type = bool,\
                             default = True)
+    parser.add_argument("-debug", "--debug",\
+                        help = "Write successful steps to txt.", type = bool,\
+                            default = False)
+    parser.add_argument("-tb", "--tb",\
+                        help = "Export graphs to TensorBoard dev.", \
+                            type = bool, default = True)
+    parser.add_argument("-tbn", "--tbn",\
+                        help = "Alternative TensorBoard experiment name.", \
+                            type = str, default = None)
     # Parse arguments
     args = parser.parse_args()
     return args
@@ -96,7 +111,6 @@ if __name__ == "__main__":
 
 # debug mode
 if False:
-    import pickle
     saved_args = "C:\\Users\\Manuel\\Nextcloud\\Masterarbeit\\py3\\vrs\\train_settings.pkl"
     with open(saved_args, "rb") as f:
         args = pickle.load(f)
@@ -111,19 +125,30 @@ step_lr = args.lrs
 es_patience = args.esp if args.esp is not None else epochz
 optmer = args.op
 kernel_init = args.ki
-drop = args.do
+drop = args.dr
 xf = args.xf
 yf = args.yf
 imgdim = args.imgdim
+lc = args.lc
 ww = args.ww
 ws = args.ws
+mk = args.mx
 wd = args.wd
 year = args.yr
 resume_training = args.r
+tb = args.tb
+tbn = args.tbn
 
 # case insensitive arguments
 mdl, optmer, xf, yf, wd, resume_training = mdl.casefold(), optmer.casefold(),\
     xf.casefold(), yf.casefold(), wd.casefold(), resume_training.casefold()
+mk = mk.casefold()
+
+print("Script executed with the following input parameters:", \
+    "Model:", mdl, "Batch size:", str(bs), "Epochs:", str(epochz), \
+    "Initial learning rate:", str(init_lr), "Learning rate decay:", \
+    str(decay_lr),
+          "Weights:", str(ww), "Metric:", str(mk))
 
 #### basic settings------------------------------------------------------------
 import platform, sys, datetime, pathlib, os
@@ -178,12 +203,15 @@ def dir_dat(dat_id = None):
         return os.path.join(wd, "dat", *dat_id)
 
 def dir_out(*out_id):
+    outdir = os.path.join(wd, "out", year)
+    if not os.path.isdir(outdir):
+        os.makedirs(outdir)
     if len(out_id) < 1:
-        return os.path.join(wd, "out")
+        return os.path.join(wd, "out", year)
     else:
         out_lst = list(out_id)
         out_ids = os.path.sep.join(out_lst)
-        return os.path.join(wd, "out", out_ids)
+        return os.path.join(wd, "out", year, out_ids)
 
 def dir_var(pkl_name = None):
     if pkl_name == None:
@@ -212,6 +240,12 @@ with open(dir_out("System_info.txt"), "w") as f:
 if args.sv:
     save_var(args, "train_settings")
     print("Saved training settings.")
+
+# debug mode text output-------------------------------------------------------
+def debug_cp(line, debug = args.debug):
+    if debug:
+        with open(dir_out("Debug.txt"), "a") as cp:
+            cp.write(line)
 
 #### data preparation directory functions--------------------------------------
 def dir_omk(plot_id = None, myear = None, type_ext = ""):
@@ -260,14 +294,17 @@ def save_dataset_info(variables, year = year, name = "dset_info"):
     with open(tile_dir + os.path.sep + name + ".pkl", "wb") as f:
         pickle.dump(variables, f)
 
-def get_dataset_info(year = year, name = "dset_info"):
-    tile_dir = dir_tls(myear = year)
-    with open(tile_dir + os.path.sep + name + ".pkl", "rb") as f:
+def get_dataset_info(dataset = year, name = "dset_info"):
+    inf_dir = os.path.join(dir_tls(myear = dataset), name + ".pkl")
+    with open(inf_dir, "rb") as f:
         return pickle.load(f)
 
 def toINT(filename):
     imgINT = filename.astype("uint8")
     return imgINT
+
+if not os.path.exists(dir_out()):
+    os.makedirs(dir_out())
 
 # get tile dimensions if not specified-----------------------------------------
 from PIL import Image
@@ -316,8 +353,7 @@ os.chdir(os.path.join(wd, "py3"))
 os.chdir(wd)
 
 # import modules---------------------------------------------------------------
-#already done in A0_LeleNet.py: import tensorflow as tf
-#import tensorflow_io as tfio
+debug_cp(line = "Import AUTOTUNE...\n")
 from tensorflow import keras as ks
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 tf.__version__
@@ -370,40 +406,56 @@ def parse_image(img_path: str) -> dict:
     return {"image": image, "segmentation_mask": mask}
 
 train_dataset = tf.data.Dataset.list_files(
-    dir_tls(myear = year, dset = "X") + os.path.sep + "*." + xf, seed = zeed)
+    dir_tls(myear = year, dset = "X") + os.path.sep + "*." + xf, seed=zeed)
 train_dataset = train_dataset.map(parse_image)
 
 val_dataset = tf.data.Dataset.list_files(
-    dir_tls(myear = year, dset = "X_val") + os.path.sep + "*." + xf, seed = zeed)
+    dir_tls(myear = year, dset = "X_val") + os.path.sep + "*." + xf, seed=zeed)
 val_dataset = val_dataset.map(parse_image)
 
 ## data transformations--------------------------------------------------------
-@tf.function
-def normalise(input_image: tf.Tensor, input_mask: tf.Tensor) -> tuple:
-    input_image = tf.cast(input_image, tf.float32) / 255.0
-    input_mask = tf.round(input_mask)
-    input_mask = tf.cast(input_mask, tf.uint8)
-    return input_image, input_mask
+if lc == 0:
+    @tf.function
+    def normalise(input_image: tf.Tensor, input_mask: tf.Tensor) -> tuple:
+        input_image = tf.cast(input_image, tf.float32) / 255.0
+        #input_image = tf.cast(input_image, tf.float32)
+        tf.image.per_image_standardization(input_image)
+        input_mask = tf.round(input_mask)
+        input_mask = tf.cast(input_mask, tf.uint8)
+        return input_image, input_mask
+else:
+    print("Adjusting classes (lowest value != 0). This slows down training.")
+    lwst_cls = tf.convert_to_tensor(lc, dtype=tf.uint8)
+    @tf.function
+    def normalise(input_image: tf.Tensor, input_mask: tf.Tensor) -> tuple:
+        input_image = tf.cast(input_image, tf.float32) / 255.0
+        #input_image = tf.cast(input_image, tf.float32)
+        tf.image.per_image_standardization(input_image)
+        input_mask = tf.round(input_mask)
+        input_mask = tf.cast(input_mask, tf.uint8)
+        input_mask = tf.subtract(input_mask, lwst_cls)
+        return input_image, input_mask
 
 @tf.function
 def load_image_train(datapoint: dict) -> tuple:
     input_image = tf.image.resize(datapoint["image"], (imgr, imgc))
-    input_mask = tf.image.resize(datapoint["segmentation_mask"], (imgr, imgc))
+    input_mask = tf.image.resize(datapoint["segmentation_mask"], \
+                                 (imgr, imgc), method = "nearest")
+    # random flip
     if tf.random.uniform(()) > 0.5:
         input_image = tf.image.flip_left_right(input_image)
         input_mask = tf.image.flip_left_right(input_mask)
-    # more experimental data augmentation
-    '''
     if tf.random.uniform(()) > 0.5:
         input_image = tf.image.flip_up_down(input_image)
         input_mask = tf.image.flip_up_down(input_mask)
-    input_image = tf.image.random_brightness(input_image, max_delta = 0.2)
-    input_image = tf.image.random_contrast(input_image, lower = 0.0, \
-                                           upper = 0.05)
-    input_image = tf.image.random_saturation(input_image, lower = 0.0, \
-                                           upper = 0.05)
-    '''
+    # normalise images
     input_image, input_mask = normalise(input_image, input_mask)
+    # more augmentation
+    input_image = tf.image.random_brightness(input_image, max_delta = 0.2)
+    input_image = tf.image.random_contrast(input_image, lower = 0.75, \
+                                           upper = 1.25)
+    input_image = tf.image.random_saturation(input_image, lower = 0.75, \
+                                           upper = 1.25)
     return input_image, input_mask
 
 @tf.function
@@ -414,6 +466,7 @@ def load_image_test(datapoint: dict) -> tuple:
     return input_image, input_mask
 
 ## create datasets-------------------------------------------------------------
+debug_cp(line = "Create datasets...")
 buff_size = 1000
 dataset = {"train": train_dataset, "val": val_dataset}
 # train dataset
@@ -434,43 +487,60 @@ print(dataset["train"])
 print(dataset["val"])
 
 # define weighs for categorical crossentropy loss function---------------------
-def calculate_weights(directory, n_classes):
-    imgs = list(pathlib.Path(directory).glob("**/*." + yf))
-    weights = np.array([0] * n_classes)
-    gravity = 0
-    for img in imgs:
-        im = Image.open(img)
-        vals = np.array(im.getdata(), dtype = np.uint8)
-        unique, counts = np.unique(vals, return_counts = True)
-        classweights = np.array([0] * n_classes)
-        classweights[unique.astype(int)] = counts
-        weights = ((weights * gravity) + classweights) / (gravity + 1)
-        gravity += 1
-        im.close()
-    return weights
-
-def estimate_weights(directory, n_classes, N = 500):
-    import random
-    imgs = list(pathlib.Path(directory).glob("**/*." + yf))
-    weights = np.array([0] * n_classes)
-    gravity = 1
-    for i in range(N):
-        x = random.randint(0, (len(imgs) - 1))
-        im = Image.open(imgs[x])
-        vals = np.array(im.getdata(), dtype = np.uint8)
-        unique, counts = np.unique(vals, return_counts = True)
-        classweights = np.array([0] * n_classes)
-        classweights[unique.astype(int)] = counts
-        weights = ((weights * gravity) + classweights) / (gravity + 1)
-        gravity += 1
-        im.close()
-    return weights
+if lc == 0:
+    def calculate_weights(directory, n_classes):
+        imgs = list(pathlib.Path(directory).glob("**/*." + yf))
+        weights = np.array([0] * n_classes)
+        gravity = 0
+        for img in imgs:
+            im = Image.open(img)
+            vals = np.array(im.getdata(), dtype = np.uint8)
+            unique, counts = np.unique(vals, return_counts = True)
+            classweights = np.array([0] * n_classes)
+            classweights[unique.astype(int)] = counts
+            weights = ((weights * gravity) + classweights) / (gravity + 1)
+            gravity += 1
+            im.close()
+        return weights
+    
+    def estimate_weights(directory, n_classes, N = 1000):
+        import random
+        imgs = list(pathlib.Path(directory).glob("**/*." + yf))
+        weights = np.array([0] * n_classes)
+        gravity = 1
+        for i in range(N):
+            x = random.randint(0, (len(imgs) - 1))
+            im = Image.open(imgs[x])
+            vals = np.array(im.getdata(), dtype = np.uint8)
+            unique, counts = np.unique(vals, return_counts = True)
+            classweights = np.array([0] * n_classes)
+            classweights[unique.astype(int)] = counts
+            weights = ((weights * gravity) + classweights) / (gravity + 1)
+            gravity += 1
+            im.close()
+        return weights
+else:
+    def calculate_weights(directory, n_classes):
+        imgs = list(pathlib.Path(directory).glob("**/*." + yf))
+        weights = np.array([0] * n_classes)
+        gravity = 0
+        for img in imgs:
+            im = Image.open(img)
+            vals = np.array(im.getdata(), dtype = np.uint8)
+            unique, counts = np.unique(vals, return_counts = True)
+            classweights = np.array([0] * n_classes)
+            classweights[unique.astype(int) - lc] = counts
+            weights = ((weights * gravity) + classweights) / (gravity + 1)
+            gravity += 1
+            im.close()
+        return weights
 
 import glob, time
+debug_cp(line = "Calculate weights...")
 if ww != 0:
-    if os.path.isfile(dir_var("weights")):
+    if os.path.isfile(os.path.join(dir_tls(myear = year), "weights.pkl")):
         print("Loading class weights...")
-        WEIGHTS, weights_timestamp = get_dataset_info("weights")
+        WEIGHTS, weights_timestamp = get_dataset_info(name = "weights")
         print("Checking class weights timestamp...")
         latest_mod = max(glob.glob(dir_tls(myear = year, dset = "y") + \
                                    os.path.sep + "*"), key = os.path.getctime)
@@ -501,8 +571,8 @@ if ww != 0:
     print("Calculated the following weights:", inv_weights)
 
 ## add weights-----------------------------------------------------------------
-def add_sample_weights(image, segmentation_mask):
-    class_weights = tf.constant(inv_weights, dtype = tf.float32)
+def add_sample_weights(image, segmentation_mask, cw = inv_weights):
+    class_weights = tf.constant(cw, dtype = tf.float32)
     class_weights = class_weights/tf.reduce_sum(class_weights)
     sample_weights = tf.gather(class_weights,
                                indices = tf.cast(segmentation_mask, tf.int32))
@@ -512,6 +582,7 @@ if ww != 0:
     dataset["train"].map(add_sample_weights).element_spec
 
 # Get model--------------------------------------------------------------------
+debug_cp(line = "Get model...")
 os.chdir(os.path.join(wd, "py3"))
 if kernel_init is not None:
     k_initializers = { \
@@ -796,6 +867,8 @@ except:
 now = datetime.datetime.now()
 logdir = os.path.join(dir_out("logs"), now.strftime("%y-%m-%d-%H-%M-%S"))
 cptdir = os.path.join(dir_out("cpts"), now.strftime("%y-%m-%d-%H-%M-%S"))
+os.makedirs(logdir, exist_ok = True)
+os.makedirs(cptdir, exist_ok = True)
 
 cllbs = [
     #ks.callbacks.ReduceLROnPlateau(monitor = "val_loss", factor = 0.2,
@@ -843,33 +916,46 @@ def dice_loss(y_true, y_pred):
 ### define focal loss
 # pip3 install focal-loss
 
+# alternative approach to weighted scce
+# https://github.com/tensorflow/models/blob/master/official/nlp/modeling/losses/weighted_sparse_categorical_crossentropy.py
+
 ## metrics
 ### get intersect. over union (original function gives error -> updated accor-
 ### ding to https://stackoverflow.com/a/61826074/11611246)
 # mIoU = ks.metrics.MeanIoU(num_classes = N_CLASSES)
-class UpdatedMeanIoU(tf.keras.metrics.MeanIoU):
+class MulticlassMeanIoU(tf.keras.metrics.MeanIoU):
     def __init__(self,
                  y_true = None,
                  y_pred = None,
                  num_classes = None,
                  name = None,
                  dtype = None):
-        super(UpdatedMeanIoU, self).__init__(num_classes = num_classes,
+        super(MulticlassMeanIoU, self).__init__(num_classes = num_classes,
                                              name = name, dtype = dtype)
 
     def update_state(self, y_true, y_pred, sample_weight = None):
         y_pred = tf.math.argmax(y_pred, axis = -1)
         return super().update_state(y_true, y_pred, sample_weight)
-mIoU = UpdatedMeanIoU(num_classes = N_CLASSES)
+
+import tensorflow_addons as tfa
+
+if mk == "f1":
+    met = tfa.metrics.F1Score(num_classes = N_CLASSES, threshold = 0.5)
+    print("Using metric f1-score")
+else:
+    mIoU = MulticlassMeanIoU(num_classes = N_CLASSES)
+    met = MulticlassMeanIoU(num_classes = N_CLASSES)
+    print("Using metric mIoU")
+#met = f1 if args.mx.casefold() == "f1" else mIoU
+
+metrix = [met, "sparse_categorical_accuracy"] if N_CLASSES > 2 else \
+    [met, "accuracy"]
 
 ### get sparse categorical/binary cross entropy
 lozz = ks.losses.SparseCategoricalCrossentropy() if N_CLASSES > 2 else\
     ks.losses.BinaryCrossentropy()
 
 #run_opts = tf.compat.v1.RunOptions(report_tensor_allocations_upon_oom = True)
-
-metrix = [mIoU, "sparse_categorical_accuracy"] if N_CLASSES > 2 else \
-    [mIoU, "accuracy"]
 
 # resume training or compile new model-----------------------------------------
 if resume_training == "f":
@@ -880,6 +966,7 @@ if resume_training == "f":
                   metrics = metrix)#, options = run_opts)
     model.summary()
 elif resume_training == "t":
+    debug_cp(line = "Resume training...")
     cpt_folders = [f for f in os.listdir(dir_out("cpts")) \
                    if not f.startswith(".")]
     cpt_dates = [datetime.datetime.strptime(d, "%y-%m-%d-%H-%M-%S"\
@@ -894,7 +981,7 @@ if resume_training != "f":
     checkpoint = max(list_of_files, key = os.path.getctime)
     try:
         model = ks.models.load_model(checkpoint, \
-                                     custom_objects = {"UpdatedMeanIoU": mIoU})
+                                     custom_objects = {"MulticlassMeanIoU": mIoU})
     except:
         print("Failed to load model from", checkpoint)
     all_logs = [dir_out("logs", p) for p in os.listdir(dir_out("logs"))]
@@ -904,16 +991,29 @@ if resume_training != "f":
                   metrics = metrix)
 
 # report to tensorboard--------------------------------------------------------
-import subprocess
-PARAMETERS = "'Batch size: " + str(bs) + " Init. lr: " + str(init_lr) + \
-    " Img dim: " + str(imgc) + " Weights: " + str(ww) + " Optimizer: " + \
-        optmer + " Dataset: " + year +"'"
-subprocess.Popen(["tensorboard", "dev", "upload", "--logdir", logdir, \
-                  "--name", "LeleNet_" + mod, "--description", \
-                      PARAMETERS], shell = False, \
-                 stdout = subprocess.DEVNULL, stderr = subprocess.STDOUT)
+if tb:
+    debug_cp(line = "Start Tensorboard dev. Directory: " + logdir + "\n")
+    import subprocess
+    PARAMETERS = "Batch size: " + str(bs) + " Init. lr: " + str(init_lr) + \
+        " Img dim: " + str(imgc) + " Weights: " + str(ww) + " Optimizer: " + \
+            optmer + " Dataset: " + year
+    '''
+    not working:
+    subprocess.Popen(["tensorboard", "dev", "upload --logdir '" + logdir + \
+                      "' --name LeleNet_" + mod + " --description '" + \
+                          PARAMETERS + "'"])
+    tb_str = "tensorboard dev upload --logdir '" + logdir + \
+                      "' --name LeleNet_" + mod + " --description '" + \
+                          PARAMETERS + "'"
+    '''
+    if tbn is None:
+        tbn = "LeleNet_" + mod
+    subprocess.call("tensorboard dev upload --logdir '" + logdir + \
+                    "' --name " + tbn + " --description '" + \
+                    PARAMETERS + "' &", shell = True)
 
 # fit model--------------------------------------------------------------------
+debug_cp(line = "Fit model...\n")
 args_fit = {"epochs" : epochz,
             "steps_per_epoch" : np.ceil(N_img/bs),
             "validation_steps" : np.ceil(N_val/bs),
@@ -950,4 +1050,12 @@ model.save(dir_out(mod), save_format = "tf", save_traces = True)
 print("Model saved to disc.")
 
 #trained_model = ks.models.load_model(dir_out(mod),\
-#                                     custom_objects = {"UpdatedMeanIoU": mIoU})
+#                                     custom_objects = {"MulticlassMeanIoU": mIoU})
+'''
+subprocess.run(["/pfs/data5/home/kit/ifgg/mp3890/.local/bin/tensorboard", \
+                "dev", "upload", "--logdir", "'" + logdir + \
+                "'", "--name", "LeleNet" + mod#, "--description" + "'" + \
+                    #PARAMETERS + "'"
+                    ], \
+               capture_output = False, text = False)
+'''
