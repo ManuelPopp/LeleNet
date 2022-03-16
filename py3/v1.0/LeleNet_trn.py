@@ -111,7 +111,8 @@ if __name__ == "__main__":
 
 # debug mode
 if False:
-    saved_args = "C:\\Users\\Manuel\\Nextcloud\\Masterarbeit\\py3\\vrs\\train_settings.pkl"
+    saved_args = \
+    "C:\\Users\\Manuel\\Nextcloud\\Masterarbeit\\py3\\vrs\\train_settings.pkl"
     with open(saved_args, "rb") as f:
         args = pickle.load(f)
     args.wd = "home"
@@ -145,6 +146,7 @@ mdl, optmer, xf, yf, wd, resume_training = mdl.casefold(), optmer.casefold(),\
 mk = mk.casefold()
 
 print("Script executed with the following input parameters:", \
+    "Dataset:", year, \
     "Model:", mdl, "Batch size:", str(bs), "Epochs:", str(epochz), \
     "Initial learning rate:", str(init_lr), "Learning rate decay:", \
     str(decay_lr),
@@ -162,11 +164,14 @@ print("Running on " + OS + " " + OS_version + ".\nPython version: " +
       "\nUTC time (start): " + str(t_start) +
       "\nLocal time (start): " + str(datetime.datetime.now()))
 
-# Model (one of "mod_UNet", "mod_FCD")
-if mdl in ["u-net", "unet", "mod_unet", "mod_u-net", "u_net"]:
+# Model (one of "mod_UNet", "mod_FCD", "mod_DL3")
+if mdl in ["u-net", "u_net", "unet", "mod_unet", "mod_u-net"]:
     mod = "mod_UNet"
-elif mdl in ["fcd", "fcdensenet", "fc-densenet", "fc-dense-net"]:
+elif mdl in ["fcd", "fcdensenet", "fc-densenet", "fc-dense-net", "mod_FCD"]:
     mod = "mod_FCD"
+elif mdl in ["deep", "deeplab", "deeplabv3+", "deeplabv3plus", "deeplabv3", \
+             "dl3", "dlv3", "dlv3+", "mod_DL3"]:
+    mod = "mod_DL3"
 else:
     raise ValueError("Unexpected input for argument 'model': " + str(mdl))
 
@@ -547,7 +552,7 @@ if ww != 0:
         img_mod_timestamp = os.path.getmtime(latest_mod)
         img_mod_timestamp = datetime.datetime.fromtimestamp(img_mod_timestamp)
         if weights_timestamp < img_mod_timestamp:
-            print("Weights out of date. Calculating new class weights...")
+            print("Weights outdated. Calculating new class weights...")
             WEIGHTS = calculate_weights(
                 os.path.dirname(dir_tls(myear = year, dset = "y")), N_CLASSES)
             weights_timestamp = datetime.datetime.now()
@@ -570,16 +575,15 @@ if ww != 0:
     inv_weights = inv_weights / max(inv_weights)
     print("Calculated the following weights:", inv_weights)
 
-## add weights-----------------------------------------------------------------
-def add_sample_weights(image, segmentation_mask, cw = inv_weights):
-    class_weights = tf.constant(cw, dtype = tf.float32)
-    class_weights = class_weights/tf.reduce_sum(class_weights)
-    sample_weights = tf.gather(class_weights,
-                               indices = tf.cast(segmentation_mask, tf.int32))
-    return image, segmentation_mask, sample_weights
-
-if ww != 0:
-    dataset["train"].map(add_sample_weights).element_spec
+    ## add weights-------------------------------------------------------------
+    def add_sample_weights(image, segmentation_mask, cw = inv_weights):
+        class_weights = tf.constant(cw, dtype = tf.float32)
+        class_weights = class_weights/tf.reduce_sum(class_weights)
+        sample_weights = tf.gather(class_weights,
+                                   indices = tf.cast(segmentation_mask, \
+                                                     tf.int32))
+        return image, segmentation_mask, sample_weights
+    print(dataset["train"].map(add_sample_weights).element_spec)
 
 # Get model--------------------------------------------------------------------
 debug_cp(line = "Get model...")
@@ -588,11 +592,14 @@ if kernel_init is not None:
     k_initializers = { \
         "he_normal" : "he_normal", \
         "he_uniform" : "he_uniform", \
-        "random_uniform" : ks.initializers.RandomUniform(minval=0., maxval=1.), \
-        "truncated_normal" : ks.initializers.TruncatedNormal(mean=0.0, \
-                                                             stddev=0.05) \
+        "random_uniform" : ks.initializers.RandomUniform(minval = 0.,\
+                                                         maxval = 1.), \
+        "truncated_normal" : ks.initializers.TruncatedNormal(mean = 0.0, \
+                                                             stddev = 0.05) \
             }
     initializer = k_initializers[kernel_init.casefold()]
+    #-------------------------------------------------------------------------
+    # U-Net
 if mod == "mod_UNet":
     if kernel_init is None:
         initializer = "he_normal"
@@ -689,6 +696,8 @@ if mod == "mod_UNet":
     
     # directory to save model
     os.makedirs(dir_out("mod_UNet"), exist_ok = True)
+    #-------------------------------------------------------------------------
+    # FCDenseNet
 elif mod == "mod_FCD":
     if kernel_init is None:
         initializer = "he_uniform"
@@ -819,6 +828,91 @@ elif mod == "mod_FCD":
     
     # directory to save model
     os.makedirs(dir_out("mod_FCD"), exist_ok = True)
+    
+    #-------------------------------------------------------------------------
+    # DeepLab V3
+elif mod == "mod_DL3":
+    # https://keras.io/examples/vision/deeplabv3_plus/
+    from tensorflow.keras import layers
+    def convolution_block(
+        block_input,
+        num_filters = 256,
+        kernel_size = 3,
+        dilation_rate = 1,
+        padding = "same",
+        use_bias = False,
+    ):
+        x = layers.Conv2D(
+            num_filters,
+            kernel_size = kernel_size,
+            dilation_rate = dilation_rate,
+            padding = "same",
+            use_bias = use_bias,
+            kernel_initializer = ks.initializers.HeNormal(),
+        )(block_input)
+        x = layers.BatchNormalization()(x)
+        return tf.nn.relu(x)
+    
+    
+    def DilatedSpatialPyramidPooling(dspp_input):
+        dims = dspp_input.shape
+        x = layers.AveragePooling2D(pool_size = (dims[-3], dims[-2]) \
+                                    )(dspp_input)
+        x = convolution_block(x, kernel_size = 1, use_bias = True)
+        out_pool = layers.UpSampling2D(
+            size = (dims[-3] // x.shape[1], dims[-2] // x.shape[2]), \
+                interpolation = "bilinear",
+        )(x)
+    
+        out_1 = convolution_block(dspp_input, kernel_size = 1, \
+                                  dilation_rate = 1)
+        out_6 = convolution_block(dspp_input, kernel_size = 3, \
+                                  dilation_rate = 6)
+        out_12 = convolution_block(dspp_input, kernel_size = 3, \
+                                   dilation_rate = 12)
+        out_18 = convolution_block(dspp_input, kernel_size = 3, \
+                                   dilation_rate = 18)
+    
+        x = layers.Concatenate(axis = -1)([out_pool, \
+                                           out_1, out_6, out_12, out_18])
+        output = convolution_block(x, kernel_size = 1)
+        return output
+
+    def DeeplabV3Plus(image_size, num_classes):
+        model_input = ks.Input(shape = (image_size, image_size, 3))
+        resnet50 = ks.applications.ResNet50(
+            weights = "imagenet", include_top = False, \
+                input_tensor = model_input
+        )
+        x = resnet50.get_layer("conv4_block6_2_relu").output
+        x = DilatedSpatialPyramidPooling(x)
+    
+        input_a = layers.UpSampling2D(
+            size = \
+                (image_size // 4 // x.shape[1], image_size // 4 // x.shape[2]),
+            interpolation = "bilinear",
+        )(x)
+        input_b = resnet50.get_layer("conv2_block3_2_relu").output
+        input_b = convolution_block(input_b, num_filters = 48, kernel_size = 1)
+    
+        x = layers.Concatenate(axis=-1)([input_a, input_b])
+        x = convolution_block(x)
+        x = convolution_block(x)
+        x = layers.UpSampling2D(
+            size = (image_size // x.shape[1], image_size // x.shape[2]),
+            interpolation = "bilinear",
+        )(x)
+        model_output = layers.Conv2D(num_classes, kernel_size = (1, 1), \
+                                     padding = "same")(x)
+        return ks.Model(inputs = model_input, outputs = model_output)
+    
+    
+    # get model
+    model = DeeplabV3Plus(image_size = imgr, num_classes = N_CLASSES)
+
+    # directory to save model
+    os.makedirs(dir_out("mod_DL3"), exist_ok = True)
+
 
 ### logs and callbacks---------------------------------------------------------
 # define callbacks
@@ -981,7 +1075,8 @@ if resume_training != "f":
     checkpoint = max(list_of_files, key = os.path.getctime)
     try:
         model = ks.models.load_model(checkpoint, \
-                                     custom_objects = {"MulticlassMeanIoU": mIoU})
+                                     custom_objects = \
+                                         {"MulticlassMeanIoU": mIoU})
     except:
         print("Failed to load model from", checkpoint)
     all_logs = [dir_out("logs", p) for p in os.listdir(dir_out("logs"))]
@@ -1028,10 +1123,14 @@ if resume_training != "f":
               "'" + checkpoint + "': Unable to find integer at position", \
                   str(checkpoint.find("Epoch.") + len("Epoch.")), "to", \
                       str(len(checkpoint)-5))
+
 if "train_generator" in locals() or "train_generator" in globals():
+    '''
     model.fit(train_generator,
                      validation_data = val_generator,
                      **args_fit)
+    '''
+    Warning("Currently no Keras ImageDataGenerators supported.")
 else:
     if ww != 0:
         model.fit(dataset["train"].map(add_sample_weights),
@@ -1049,7 +1148,7 @@ os.makedirs(dir_out(mod), exist_ok = True)
 model.save(dir_out(mod), save_format = "tf", save_traces = True)
 print("Model saved to disc.")
 
-#trained_model = ks.models.load_model(dir_out(mod),\
+#model = ks.models.load_model(dir_out(mod),\
 #                                     custom_objects = {"MulticlassMeanIoU": mIoU})
 '''
 subprocess.run(["/pfs/data5/home/kit/ifgg/mp3890/.local/bin/tensorboard", \
@@ -1059,3 +1158,116 @@ subprocess.run(["/pfs/data5/home/kit/ifgg/mp3890/.local/bin/tensorboard", \
                     ], \
                capture_output = False, text = False)
 '''
+
+# Test results-----------------------------------------------------------------
+moddir = dir_out(mod)
+from matplotlib import pyplot as plt
+from matplotlib.colors import Normalize
+
+def display_sample(display_list, tst = "a"):
+    """Show side-by-side an input image,
+    the ground truth and the prediction.
+    """
+    plt.figure(figsize = (18, 18))
+
+    title = ["Input Image", "True Mask", "Predicted Mask"]
+    plt.subplot(1, len(display_list), 1)
+    plt.title(title[0])
+    plt.imshow(tf.keras.preprocessing.image.array_to_img(display_list[0]))
+    plt.axis("off")
+    for i in range(1, len(display_list)):
+        plt.subplot(1, len(display_list), i+1)
+        plt.title(title[i])
+        plt.imshow(tf.keras.preprocessing.image.array_to_img(display_list[i],\
+                                                             scale = False),
+                   interpolation = "nearest",
+                   cmap = plt.get_cmap("gist_rainbow"),#norm = Normalize(
+                   vmin = 0, vmax = N_CLASSES)#)
+        plt.axis("off")
+    plt.show()
+    plt.savefig(os.path.join(moddir, "Test" + tst + ".png"))
+
+def create_mask(pred_mask: tf.Tensor) -> tf.Tensor:
+    """Return a filter mask with the top 1 predictions
+    only.
+
+    Parameters
+    ----------
+    pred_mask : tf.Tensor
+        A [IMG_SIZE, IMG_SIZE, N_CLASS] tensor. For each pixel we have
+        N_CLASS values (vector) which represents the probability of the pixel
+        being these classes. Example: A pixel with the vector [0.0, 0.0, 1.0]
+        has been predicted class 2 with a probability of 100%.
+
+    Returns
+    -------
+    tf.Tensor
+        A [IMG_SIZE, IMG_SIZE, 1] mask with top 1 predictions
+        for each pixels.
+    """
+    pred_mask = tf.argmax(pred_mask, axis = -1)
+    pred_mask = tf.expand_dims(pred_mask, axis = -1)
+    return pred_mask
+
+def show_predictions(dataset = None, num = 1, t = "a"):
+    if dataset:
+        for image, mask in dataset.take(num):
+            pred_mask = model.predict(image)
+            display_sample([image[0], true_mask, create_mask(pred_mask)])
+    else:
+        one_img_batch = sample_image[0][tf.newaxis, ...]
+        inference = model.predict(one_img_batch)
+        pred_mask = create_mask(inference)
+        display_sample([sample_image[0], sample_mask[0],
+                        pred_mask[0]], tst = t)
+
+# Mask and prediction
+for test in map(chr, range(*map(ord, ["a", "n"]))):
+    if "val_generator" in globals():
+        sample_image, sample_mask = next(val_generator)
+    else:
+        for image, mask in dataset["val"].take(1):
+            sample_image, sample_mask = image, mask
+    show_predictions(t = test)
+    mask_array = np.array(sample_mask[0])
+    inference = model.predict(np.expand_dims(sample_image[0], axis = 0))
+    pred = create_mask(inference)
+    y_pred, y_true = inference[0], sample_mask[0]
+    mask_vals, mask_counts = np.unique(mask_array, return_counts = True)
+    pred_vals, pred_counts = np.unique(pred, return_counts = True)
+    print("Mask classes:\n", mask_vals)
+    print("Frequencies:\n", mask_counts)
+    print("Predicted classes:\n", pred_vals)
+    print("Frequencies:\n", pred_counts)
+
+# Confusion matrix
+def compute_confusion_matrix_sample(image, mask, cnn):
+    true_array = np.array(mask[0]).astype(int)
+    pred = cnn.predict(np.expand_dims(image[0], axis = 0))
+    pred_array = create_mask(pred)
+    pred_array = np.squeeze(pred_array, axis = 0)
+    K = pred.shape[-1] 
+    matrix = np.zeros((K, K))
+    true_array = true_array.ravel()
+    pred_array = pred_array.ravel()
+    for clss in range(len(true_array)):
+        matrix[true_array[clss]][pred_array[clss]] += 1
+    return matrix
+
+for i in range(1, 500):
+    for image, mask in dataset["val"].take(1):
+            sample_image, sample_mask = image, mask
+    if "confusion_matrix" in globals():
+        confusion_matrix = confusion_matrix.__add__(\
+                        compute_confusion_matrix_sample(sample_image,\
+                                                        sample_mask,\
+                                                            model))
+    else:
+        confusion_matrix = compute_confusion_matrix_sample(sample_image,\
+                                                           sample_mask,\
+                                                               model)
+np.savetxt(os.path.join(moddir, "confusion_matr.csv"),\
+           confusion_matrix, delimiter = "\t")
+
+plt.matshow(confusion_matrix, cmap = plt.cm.gray_r)
+plt.savefig(dir_out("Confusion" + ".png"))
