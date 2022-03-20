@@ -158,7 +158,9 @@ OS = platform.system()
 OS_version = platform.release()
 py_version = sys.version
 t_start = datetime.datetime.utcnow()
+
 import tensorflow as tf
+import tensorflow_addons as tfa
 print("Running on " + OS + " " + OS_version + ".\nPython version: " +
       py_version + "\nTensorflow version: " + tf.__version__ +
       "\nUTC time (start): " + str(t_start) +
@@ -371,8 +373,10 @@ print("N GPUs available: ", len(phys_devs))
 #    tf.config.experimental.set_memory_growth(phys_devs[0], True)
 #else:
 #    #os.environ['CUDA_VISIBLE_DEVICES'] = "-1"
-#    my_devices = tf.config.experimental.list_physical_devices(device_type = "CPU")
-#    tf.config.experimental.set_visible_devices(devices = my_devices, device_type = "CPU")
+#    my_devices = tf.config.experimental.list_physical_devices( \
+#                                                    device_type = "CPU")
+#    tf.config.experimental.set_visible_devices(devices = my_devices, \
+#                                                device_type = "CPU")
 #    print("No GPUs used.")
 
 ## general options/info--------------------------------------------------------
@@ -450,17 +454,60 @@ def load_image_train(datapoint: dict) -> tuple:
     if tf.random.uniform(()) > 0.5:
         input_image = tf.image.flip_left_right(input_image)
         input_mask = tf.image.flip_left_right(input_mask)
+    '''
     if tf.random.uniform(()) > 0.5:
         input_image = tf.image.flip_up_down(input_image)
         input_mask = tf.image.flip_up_down(input_mask)
+    '''
+    ###########################################################################
+    ## experimental augmentation
+    # random rotation
+    angle = tf.random.uniform(())
+    input_image = tfa.image.rotate(input_image, \
+                                   (2*np.pi*angle), \
+                                       interpolation = "nearest", \
+                                           fill_mode = "reflect")
+    input_mask = tfa.image.rotate(input_mask, \
+                                  (2*np.pi*angle), \
+                                      interpolation = "nearest", \
+                                          fill_mode = "reflect")
+    # resize to (almost) fill original image
+    # random scaling (do not use): = ((tf.random.uniform(()) * 0.2) + 0.8)
+    # added 1, divided by 2 to reduce filled area while keeping resize at not
+    # too extreme zoom levels
+    scaling = (np.sqrt(1 + np.sin(2 * angle)) + 1) / 2
+    input_image = tf.image.resize_with_pad(input_image, \
+                                        target_height = int(tf.math.round( \
+                                            imgr * scaling)), \
+                                        target_width = int(tf.math.round( \
+                                            imgc * scaling)), \
+                                        method = "lanczos3")
+    input_mask = tf.image.resize_with_pad(input_mask, \
+                                        target_height = int(tf.math.round( \
+                                            imgr * scaling)), \
+                                        target_width = int(tf.math.round( \
+                                            imgc * scaling)), \
+                                        method = "nearest")
+    # clip to original size (central crop as fraction of scaled image)
+    input_image = tf.image.central_crop(input_image, \
+                                        central_fraction = 1 / scaling)
+    input_mask = tf.image.central_crop(input_mask, \
+                                       central_fraction = 1 / scaling)
+    # resize to original size (not as fraction but fix int value) to make sure
+    # images have the original resolution (prevent potential rounding errors)
+    input_image = tf.image.resize(input_image, (imgr, imgc))
+    input_mask = tf.image.resize(input_mask, (imgr, imgc))
+    ###########################################################################
     # normalise images
     input_image, input_mask = normalise(input_image, input_mask)
     # more augmentation
-    input_image = tf.image.random_brightness(input_image, max_delta = 0.2)
+    input_image = tf.image.random_brightness(input_image, max_delta = 0.1)
     input_image = tf.image.random_contrast(input_image, lower = 0.75, \
                                            upper = 1.25)
     input_image = tf.image.random_saturation(input_image, lower = 0.75, \
                                            upper = 1.25)
+    input_image = tf.clip_by_value(input_image, clip_value_min = 0, \
+                                   clip_value_max = 1)
     return input_image, input_mask
 
 @tf.function
@@ -686,9 +733,9 @@ if mod == "mod_UNet":
         else:
             outputz = ks.layers.Conv2D(1, (1, 1), activation = "sigmoid")(uc9)
     
-        model = ks.Model(inputs = [inputz], outputs = [outputz])
+        model = ks.Model(inputs = inputz, outputs = outputz)
         print(model.summary())
-        print(f'Total number of layers: {len(model.layers)}')
+        print(f'Total number of ks.layers: {len(model.layers)}')
         return model
 
     # get model
@@ -742,11 +789,11 @@ elif mod == "mod_FCD":
         :param n_classes: number of classes
         :param n_filters_first_conv: number of filters for the first
             convolution applied
-        :param n_pool: number of pooling layers = number of transition down =
+        :param n_pool: number of pooling ks.layers=number of transition down=
             number of transition up
         :param growth_rate: number of new feature maps created by each layer
             in a dense block
-        :param n_layers_per_block: number of layers per block. Can be an int
+        :param n_layers_per_block: number of ks.layers per block. Can be an int
             or a list of size 2 * n_pool + 1
         :param dropout_p: dropout rate applied after each convolution
             (0. for not using)
@@ -789,7 +836,8 @@ elif mod == "mod_FCD":
         skip_connection_list = skip_connection_list[::-1]
         
         # bottleneck
-        ## store output of subsequent dense block; upsample only these new features
+        ## store output of subsequent dense block;
+        ## upsample only these new features
         block_to_upsample = []
         # dense Block
         for j in range(n_layers_per_block[n_pool]):
@@ -799,7 +847,8 @@ elif mod == "mod_FCD":
         
         # upsampling path
         for i in range(n_pool):
-            ## Transition Up ( Upsampling + concatenation with the skip connection)
+            ## Transition Up ( Upsampling + concatenation with the skip
+            ## connection)
             n_filters_keep = growth_rate * n_layers_per_block[n_pool + i]
             Tiramisu = TransitionUp(skip_connection_list[i], block_to_upsample,
                                  n_filters_keep)
@@ -817,10 +866,9 @@ elif mod == "mod_FCD":
         else:
             outputz = ks.layers.Conv2D(1, (1, 1), \
                                    activation = "sigmoid")(Tiramisu)
-
-        model = tf.keras.Model(inputs = [inputz], outputs = [outputz])
+        model = tf.keras.Model(inputs = inputz, outputs = outputz)
         print(model.summary())
-        print(f'Total number of layers: {len(model.layers)}')
+        print(f'Total number of ks.layers: {len(model.layers)}')
         return model
     
     # get model
@@ -833,7 +881,6 @@ elif mod == "mod_FCD":
     # DeepLab V3
 elif mod == "mod_DL3":
     # https://keras.io/examples/vision/deeplabv3_plus/
-    from tensorflow.keras import layers
     def convolution_block(
         block_input,
         num_filters = 256,
@@ -842,7 +889,7 @@ elif mod == "mod_DL3":
         padding = "same",
         use_bias = False,
     ):
-        x = layers.Conv2D(
+        x = ks.layers.Conv2D(
             num_filters,
             kernel_size = kernel_size,
             dilation_rate = dilation_rate,
@@ -850,16 +897,15 @@ elif mod == "mod_DL3":
             use_bias = use_bias,
             kernel_initializer = ks.initializers.HeNormal(),
         )(block_input)
-        x = layers.BatchNormalization()(x)
+        x = ks.layers.BatchNormalization()(x)
         return tf.nn.relu(x)
-    
     
     def DilatedSpatialPyramidPooling(dspp_input):
         dims = dspp_input.shape
-        x = layers.AveragePooling2D(pool_size = (dims[-3], dims[-2]) \
+        x = ks.layers.AveragePooling2D(pool_size = (dims[-3], dims[-2]) \
                                     )(dspp_input)
         x = convolution_block(x, kernel_size = 1, use_bias = True)
-        out_pool = layers.UpSampling2D(
+        out_pool = ks.layers.UpSampling2D(
             size = (dims[-3] // x.shape[1], dims[-2] // x.shape[2]), \
                 interpolation = "bilinear",
         )(x)
@@ -873,21 +919,21 @@ elif mod == "mod_DL3":
         out_18 = convolution_block(dspp_input, kernel_size = 3, \
                                    dilation_rate = 18)
     
-        x = layers.Concatenate(axis = -1)([out_pool, \
+        x = ks.layers.Concatenate(axis = -1)([out_pool, \
                                            out_1, out_6, out_12, out_18])
         output = convolution_block(x, kernel_size = 1)
         return output
 
     def DeeplabV3Plus(image_size, num_classes):
-        model_input = ks.Input(shape = (image_size, image_size, 3))
+        inputz = ks.Input(shape = (image_size, image_size, 3))
         resnet50 = ks.applications.ResNet50(
             weights = "imagenet", include_top = False, \
-                input_tensor = model_input
+                input_tensor = inputz
         )
         x = resnet50.get_layer("conv4_block6_2_relu").output
         x = DilatedSpatialPyramidPooling(x)
     
-        input_a = layers.UpSampling2D(
+        input_a = ks.layers.UpSampling2D(
             size = \
                 (image_size // 4 // x.shape[1], image_size // 4 // x.shape[2]),
             interpolation = "bilinear",
@@ -895,24 +941,22 @@ elif mod == "mod_DL3":
         input_b = resnet50.get_layer("conv2_block3_2_relu").output
         input_b = convolution_block(input_b, num_filters = 48, kernel_size = 1)
     
-        x = layers.Concatenate(axis=-1)([input_a, input_b])
+        x = ks.layers.Concatenate(axis=-1)([input_a, input_b])
         x = convolution_block(x)
         x = convolution_block(x)
-        x = layers.UpSampling2D(
+        x = ks.layers.UpSampling2D(
             size = (image_size // x.shape[1], image_size // x.shape[2]),
             interpolation = "bilinear",
         )(x)
-        model_output = layers.Conv2D(num_classes, kernel_size = (1, 1), \
+        outputz = ks.layers.Conv2D(num_classes, kernel_size = (1, 1), \
                                      padding = "same")(x)
-        return ks.Model(inputs = model_input, outputs = model_output)
-    
+        return ks.Model(inputs = inputz, outputs = outputz)
     
     # get model
     model = DeeplabV3Plus(image_size = imgr, num_classes = N_CLASSES)
 
     # directory to save model
     os.makedirs(dir_out("mod_DL3"), exist_ok = True)
-
 
 ### logs and callbacks---------------------------------------------------------
 # define callbacks
@@ -989,7 +1033,7 @@ cllbs = [
 #    return 1 - IoU_coe(y_true, y_pred)
 
 ### define dice coefficient
-### https://github.com/tensorlayer/tensorlayer/blob/master/tensorlayer/cost.py#L216
+# https://github.com/tensorlayer/tensorlayer/blob/master/tensorlayer/cost.py#L216
 def dice_coe(target, output, loss_type = "jaccard",
              axis = (1, 2, 3), smooth = 1):# orig. val. smooth = 1e-5
     inse = tf.reduce_sum(output * target, axis = axis)
@@ -1010,7 +1054,7 @@ def dice_loss(y_true, y_pred):
 ### define focal loss
 # pip3 install focal-loss
 
-# alternative approach to weighted scce
+## alternative approach to weighted scce
 # https://github.com/tensorflow/models/blob/master/official/nlp/modeling/losses/weighted_sparse_categorical_crossentropy.py
 
 ## metrics
@@ -1030,8 +1074,6 @@ class MulticlassMeanIoU(tf.keras.metrics.MeanIoU):
     def update_state(self, y_true, y_pred, sample_weight = None):
         y_pred = tf.math.argmax(y_pred, axis = -1)
         return super().update_state(y_true, y_pred, sample_weight)
-
-import tensorflow_addons as tfa
 
 if mk == "f1":
     met = tfa.metrics.F1Score(num_classes = N_CLASSES, threshold = 0.5)
@@ -1102,7 +1144,7 @@ if tb:
                           PARAMETERS + "'"
     '''
     if tbn is None:
-        tbn = "LeleNet_" + mod
+        tbn = "LeleNet_" + mod + "_" + year
     subprocess.call("tensorboard dev upload --logdir '" + logdir + \
                     "' --name " + tbn + " --description '" + \
                     PARAMETERS + "' &", shell = True)
@@ -1119,7 +1161,7 @@ if resume_training != "f":
         e = checkpoint.find("Epoch.") + len("Epoch.") + 2
         args_fit["initial_epoch"] = int(checkpoint[s : e])
     except:
-        print("Error when trying to retreive the epoch number from filename", \
+        print("Error when trying to retreive the epoch number from filename",\
               "'" + checkpoint + "': Unable to find integer at position", \
                   str(checkpoint.find("Epoch.") + len("Epoch.")), "to", \
                       str(len(checkpoint)-5))
@@ -1149,15 +1191,7 @@ model.save(dir_out(mod), save_format = "tf", save_traces = True)
 print("Model saved to disc.")
 
 #model = ks.models.load_model(dir_out(mod),\
-#                                     custom_objects = {"MulticlassMeanIoU": mIoU})
-'''
-subprocess.run(["/pfs/data5/home/kit/ifgg/mp3890/.local/bin/tensorboard", \
-                "dev", "upload", "--logdir", "'" + logdir + \
-                "'", "--name", "LeleNet" + mod#, "--description" + "'" + \
-                    #PARAMETERS + "'"
-                    ], \
-               capture_output = False, text = False)
-'''
+#                             custom_objects = {"MulticlassMeanIoU": mIoU})
 
 # Test results-----------------------------------------------------------------
 moddir = dir_out(mod)
@@ -1188,23 +1222,6 @@ def display_sample(display_list, tst = "a"):
     plt.savefig(os.path.join(moddir, "Test" + tst + ".png"))
 
 def create_mask(pred_mask: tf.Tensor) -> tf.Tensor:
-    """Return a filter mask with the top 1 predictions
-    only.
-
-    Parameters
-    ----------
-    pred_mask : tf.Tensor
-        A [IMG_SIZE, IMG_SIZE, N_CLASS] tensor. For each pixel we have
-        N_CLASS values (vector) which represents the probability of the pixel
-        being these classes. Example: A pixel with the vector [0.0, 0.0, 1.0]
-        has been predicted class 2 with a probability of 100%.
-
-    Returns
-    -------
-    tf.Tensor
-        A [IMG_SIZE, IMG_SIZE, 1] mask with top 1 predictions
-        for each pixels.
-    """
     pred_mask = tf.argmax(pred_mask, axis = -1)
     pred_mask = tf.expand_dims(pred_mask, axis = -1)
     return pred_mask
