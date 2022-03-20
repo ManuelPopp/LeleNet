@@ -462,13 +462,13 @@ def load_image_train(datapoint: dict) -> tuple:
     ###########################################################################
     ## experimental augmentation
     # random rotation
-    angle = tf.random.uniform(())
+    angle = np.random.rand(1) * 2 * np.pi
     input_image = tfa.image.rotate(input_image, \
-                                   (2*np.pi*angle), \
+                                   angle, \
                                        interpolation = "nearest", \
                                            fill_mode = "reflect")
     input_mask = tfa.image.rotate(input_mask, \
-                                  (2*np.pi*angle), \
+                                  angle, \
                                       interpolation = "nearest", \
                                           fill_mode = "reflect")
     # resize to (almost) fill original image
@@ -476,17 +476,13 @@ def load_image_train(datapoint: dict) -> tuple:
     # added 1, divided by 2 to reduce filled area while keeping resize at not
     # too extreme zoom levels
     scaling = (np.sqrt(1 + np.sin(2 * angle)) + 1) / 2
-    input_image = tf.image.resize_with_pad(input_image, \
-                                        target_height = int(tf.math.round( \
-                                            imgr * scaling)), \
-                                        target_width = int(tf.math.round( \
-                                            imgc * scaling)), \
+    input_image = tf.image.resize(input_image, \
+                                        (int(imgr * scaling), \
+                                         int(imgc * scaling)), \
                                         method = "lanczos3")
-    input_mask = tf.image.resize_with_pad(input_mask, \
-                                        target_height = int(tf.math.round( \
-                                            imgr * scaling)), \
-                                        target_width = int(tf.math.round( \
-                                            imgc * scaling)), \
+    input_mask = tf.image.resize(input_mask, \
+                                        (int(imgr * scaling), \
+                                         int(imgc * scaling)), \
                                         method = "nearest")
     # clip to original size (central crop as fraction of scaled image)
     input_image = tf.image.central_crop(input_image, \
@@ -495,8 +491,10 @@ def load_image_train(datapoint: dict) -> tuple:
                                        central_fraction = 1 / scaling)
     # resize to original size (not as fraction but fix int value) to make sure
     # images have the original resolution (prevent potential rounding errors)
-    input_image = tf.image.resize(input_image, (imgr, imgc))
-    input_mask = tf.image.resize(input_mask, (imgr, imgc))
+    input_image = tf.image.resize(input_image, (imgr, imgc), \
+                                  method = "lanczos3")
+    input_mask = tf.image.resize(input_mask, (imgr, imgc), \
+                                  method = "nearest")
     ###########################################################################
     # normalise images
     input_image, input_mask = normalise(input_image, input_mask)
