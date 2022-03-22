@@ -647,7 +647,12 @@ if kernel_init is not None:
     # U-Net
 if mod == "mod_UNet":
     if kernel_init is None:
-        initializer = "he_normal"
+        # as suggested by Ronneberget et al. (2015):
+        # Gaussian distribution with sd of sqrt(2/N) where N = number incoming
+        # nodes of one neuron
+        initializer = ks.initializers.HeNormal() # or "he_normal"
+    else:
+        initializer = kernel_init
     def UNet(n_classes, input_shape = (imgr, imgc, imgdim), dropout = drop, \
              filters = 64, \
          ops = {"activation" : "relu",
@@ -745,7 +750,8 @@ if mod == "mod_UNet":
     # FCDenseNet
 elif mod == "mod_FCD":
     if kernel_init is None:
-        initializer = "he_uniform"
+        # following Jegou et al (2017)
+        initializer = ks.initializers.HeUniform() # or "he_uniform"
     def BN_ReLU_Conv(inputs, n_filters, filter_size = 3, dropout_p = drop):
         l = ks.layers.BatchNormalization()(inputs)
         l = ks.layers.Activation("relu")(l)
@@ -982,7 +988,7 @@ if init_lr is not None:
     optimizers = {
         "adam" : ks.optimizers.Adam(learning_rate = lr_sched, \
                                     clipnorm = 1), \
-        "sgd" : ks.optimizers.SGD(learning_rate = init_lr, \
+        "sgd" : ks.optimizers.SGD(learning_rate = lr_sched, \
                                   clipnorm = 1), \
         "rms" : ks.optimizers.RMSprop(learning_rate = lr_sched, \
                                       clipnorm = 1)
