@@ -14,6 +14,6 @@
 module purge
 module load devel/cuda/11.4
 source $HOME/venv/bin/activate
-python3 $HOME/LeleNet/py3/LeleNet_trn.py "dl3" 5 50 -yr "felix" -ww 1.0 -op "adam" -lc 1
+python3 $HOME/LeleNet/py3/LeleNet_trn.py "dl3" 5 50 -yr "512_3_class_Ld" -ww 1.0 -op "adam" -lc 1
 #python3 $HOME/LeleNet/py3/XX_Testing_and_visualisation.py
 deactivate
