@@ -8,7 +8,9 @@ Set general functions and variables.
 """
 __author__ = "Manuel R. Popp"
 
-trn_plots = ["B1_6_0003", "B1_6_0023", "B1_6_0063", "B1_6_0078", "B1_6_0086",\
+trn_plots = []
+'''
+["B1_6_0003", "B1_6_0023", "B1_6_0063", "B1_6_0078", "B1_6_0086",\
              "B1_6_0119", "B1_6_0136", "B1_6_0140", "B1_6_0151", "B1_6_0181",\
              "B1_6_0198", "B1_6_0209", "B1_6_0239", "B1_6_0256", "B1_6_0428",\
              "B1_6_0447", "B1_6_0480", "B1_6_0417", "B1_6_0498", "B2_2_0043",\
@@ -17,13 +19,19 @@ trn_plots = ["B1_6_0003", "B1_6_0023", "B1_6_0063", "B1_6_0078", "B1_6_0086",\
              "B4_5_0061", "B4_5_0157", "B4_5_0166", "B5_4_0550", "B5_4_0560",\
              "B5_4_0657", "B5_4_0665", "B6_4_0554", "B6_4_0560", "B6_4_0624",\
              "B6_4_0650", "B7_6_0452", "B7_6_0463", "B8_4_0080", "B8_4_0088"]#, "B7_6_0583", "B7_6_0590", "B8_4_0192", "B8_4_0205"]
-val_plots = ["B1_6_0286", "B1_6_0267", "B2_2_0061", "B2_2_0131", "B2_2_0148",\
+'''
+val_plots = []
+'''
+["B1_6_0286", "B1_6_0267", "B2_2_0061", "B2_2_0131", "B2_2_0148",\
              "B3_4_0065", "B3_4_0192", "B4_5_0044", "B4_5_0149", "B5_4_0542",\
              "B5_4_0647", "B6_4_0544", "B6_4_0615",  "B7_6_0482", "B8_4_0060"]#, "B7_6_0598", "B8_4_0174"]
-all_plots = trn_plots + val_plots
+'''
+tst_plots = ["ortho_B1_2", "ortho_B1_3", "ortho_B1_4", "ortho_B1_5"]
+all_plots = trn_plots + val_plots + tst_plots
 
 #### parse arguments-----------------------------------------------------------
 import argparse
+import urllib.request # in case it isn't loaded properly by arcgis
 
 def parseArguments():
     parser = argparse.ArgumentParser()
@@ -88,6 +96,7 @@ mark_bad_data = args.mbd
 wd = "home"
 wd = args.wd
 just_add = args.add
+extent_from_shapefile = False
 
 if imgd is not None:
     imgr = imgd
@@ -111,8 +120,7 @@ if wd == "home":
     if OS == "Linux":
         wd = "/home/manuel/Nextcloud/Masterarbeit"
     elif OS == "Windows":
-        wd = os.path.join("C:\\", "Users", "Manuel", "Nextcloud", \
-                          "Masterarbeit")
+        wd = os.path.join("G:\\", "Masterarbeit")
     else:
         raise Exception("OS not detected.")
 elif wd == "":
@@ -120,6 +128,8 @@ elif wd == "":
     wd = os.path.dirname(pydir)
 else:
     wd = args.wd
+
+print("wd: " + wd)
 
 def dir_fig(fig_id = None):
     if fig_id == None:
@@ -221,176 +231,175 @@ import pandas as pd
 specdict = pd.read_excel(dir_dat("xls,SpeciesList.xlsx"),
                          sheet_name = "Dictionary", header = 0)
 
-from PIL import Image#for comparison of image dimensions
-for set_X, set_y, use_plots in zip(["X", "X_val"], ["y", "y_val"],\
-                                   [trn_plots, val_plots]):
-    delete_old_tiles = True
-    ## AcrGIS Online log-in
-    import arcgis, math
-    from arcgis.gis import GIS
-    gis = GIS("pro")
-    def dir_shp(plot_id = None, mdate = None):
-        if mdate == None:
-            if plot_id == None:
-                return(dir_dat("shp"))
-            else:
-                print("Option 'mdate' missing but required.")
+# Define functions-------------------------------------------------------------
+## AcrGIS Online
+import arcgis, math
+from arcgis.gis import GIS
+gis = GIS("pro")
+def dir_shp(plot_id = None, mdate = None):
+    if mdate == None:
+        if plot_id == None:
+            return(dir_dat("shp"))
         else:
-            if plot_id == None:
-                return(os.path.join(dir_dat("shp"), mdate))
-            else:
-                os.makedirs(os.path.join(dir_dat("shp"), mdate, plot_id),
-                            exist_ok = True)
-                return(os.path.join(dir_dat("shp"), mdate, plot_id))
-    
-    def downloadShapefiles(plot_id, path, dateTime = None):
-        try:
-            ## Search items by username
-            cont = gis.content.search("owner:{0}".format("manuel.popp_KIT"),
-                                      max_items = 3*len(trn_plots) + 50)
-            for i in range(len(cont)):
-                shp = cont[i]
-                if plot_id in shp.title and shp.type == "Feature Service":
-                    if len(list(pathlib.Path(path). \
-                                 glob("**/*" + plot_id + ".shp"))) < 1:
-                        update = True
-                        print("Downloading Feature layer", plot_id + "...")
-                    elif not datetime == None:
-                        item = gis.content.get(shp.id)
-                        data_modfd = max(
-                            [j.properties.editingInfo.lastEditDate \
-                            for j \
-                            in item.layers + item.tables]\
-                            )
-                        update = data_modfd/1000 > dateTime
-                        if update:
-                            print("Updating Feature layer", plot_id + "...")
-                        else:
-                            print("Feature layer", plot_id, \
-                                  "already up-to-date.")
-                        #somehow, ArcGIS timestamp has to be divided by 1000
-                        #datetime.datetime.fromtimestamp(data_modfd/1000)
-                        #datetime.datetime.fromtimestamp(dateTime)
-                    elif dateTime == "any":
-                        update = True
-                    else:
-                        update = False
+            print("Option 'mdate' missing but required.")
+    else:
+        if plot_id == None:
+            return(os.path.join(dir_dat("shp"), mdate))
+        else:
+            os.makedirs(os.path.join(dir_dat("shp"), mdate, plot_id),
+                        exist_ok = True)
+            return(os.path.join(dir_dat("shp"), mdate, plot_id))
+
+def downloadShapefiles(plot_id, path, dateTime = None):
+    try:
+        ## Search items by username
+        cont = gis.content.search("owner:{0}".format("manuel.popp_KIT"),
+                                  max_items = 3*len(trn_plots) + 999)
+        for i in range(len(cont)):
+            shp = cont[i]
+            if plot_id in shp.title and shp.type == "Feature Service":
+                if len(list(pathlib.Path(path). \
+                             glob("**/*" + plot_id + ".shp"))) < 1:
+                    update = True
+                    print("Shapefile", plot_id, "not found.", \
+                          "Downloading Feature Service from ArcGIS Online...")
+                elif not datetime == None:
+                    item = gis.content.get(shp.id)
+                    data_modfd = max(
+                        [j.properties.editingInfo.lastEditDate \
+                        for j \
+                        in item.layers + item.tables]\
+                        )
+                    update = data_modfd/1000 > dateTime
                     if update:
-                        shapefile = shp.export("layer {}".format(shp.type),
-                                               "Shapefile")
-                        shapefile.download(path)
-                        shapefile.delete()
-                        import zipfile as zf
-                        tmp = zf.ZipFile(
-                            list(pathlib.Path(path). \
-                                 glob("**/*.zip"))[0],
-                                mode = "r")
-                        tmp.extractall(path = path)
-                        tmp.close()
-                        os.remove(list(pathlib.Path(path). \
-                                       glob("**/*.zip"))[0])
-        except Exception as e:
-            print(e)
-    
-    def get_classes(path, plots):
-        from osgeo import ogr
-        drv = ogr.GetDriverByName("ESRI Shapefile")
-        ## read existing classes
-        files = list(pathlib.Path(path).glob("**/*.shp"))
-        folder = list(os.path.basename(file.parent) for file in files)
-        plotfiles = list(np.where(np.isin(folder, plots)))
-        files = [val for val, use in zip(files, np.isin(folder, plots)) if use]
-        shapefiles = []
-        for file in files:
-            par = file.parents[0]
-            plot = str(par.name)
-            if str(plot + ".shp") in str(file):
-                shapefiles.append(file)
-        class_list = []
-        for path_shp in shapefiles:
-            dataSource = drv.Open(os.path.join(path_shp), 0)
-            layer = dataSource.GetLayer()
-            feature = layer.GetNextFeature()
-            while feature:
-                class_list.append(feature.GetField("SpeciesID"))
-                feature = layer.GetNextFeature()
-            feature = None
-            layer = None
-            dataSource = None
-        class_set = set(class_list)
-        classes = list(class_set)
-        return(classes)
-    
-    def encode_classes(path, classes, custom_dict = None):
-        from osgeo import ogr
-        drv = ogr.GetDriverByName("ESRI Shapefile")
-        ## create new field
-        dataSource = drv.Open(path, 1)
-        FDef = ogr.FieldDefn("Class", ogr.OFTInteger)
+                        print("Updating Feature layer", plot_id + "...")
+                    else:
+                        print("Feature layer", plot_id, \
+                              "already up-to-date.")
+                    #somehow, ArcGIS timestamp has to be divided by 1000
+                    #datetime.datetime.fromtimestamp(data_modfd/1000)
+                    #datetime.datetime.fromtimestamp(dateTime)
+                elif dateTime == "any":
+                    update = True
+                else:
+                    update = False
+                if update:
+                    shapefile = shp.export("layer {}".format(shp.type),
+                                           "Shapefile")
+                    shapefile.download(path)
+                    shapefile.delete()
+                    import zipfile as zf
+                    tmp = zf.ZipFile(
+                        list(pathlib.Path(path). \
+                             glob("**/*.zip"))[0],
+                            mode = "r")
+                    tmp.extractall(path = path)
+                    tmp.close()
+                    os.remove(list(pathlib.Path(path). \
+                                   glob("**/*.zip"))[0])
+    except Exception as e:
+        print(e)
+
+def get_classes(path, plots):
+    from osgeo import ogr
+    drv = ogr.GetDriverByName("ESRI Shapefile")
+    ## read existing classes
+    files = list(pathlib.Path(path).glob("**/*.shp"))
+    folder = list(os.path.basename(file.parent) for file in files)
+    plotfiles = list(np.where(np.isin(folder, plots)))
+    files = [val for val, use in zip(files, np.isin(folder, plots)) if use]
+    shapefiles = []
+    for file in files:
+        par = file.parents[0]
+        plot = str(par.name)
+        if str(plot + ".shp") in str(file):
+            shapefiles.append(file)
+    class_list = []
+    for path_shp in shapefiles:
+        dataSource = drv.Open(os.path.join(path_shp), 0)
         layer = dataSource.GetLayer()
-        exists = layer.GetLayerDefn().GetFieldIndex("Class") >= 0
-        if not exists:
-            layer.CreateField(FDef)
         feature = layer.GetNextFeature()
         while feature:
-            spec = feature.GetField("SpeciesID")
-            c = classes.index(spec) if custom_dict is None else\
-                custom_dict.loc[custom_dict.SpeciesID == spec, "Class"].item()
-            feature.SetField("Class", c)
-            layer.SetFeature(feature)
+            class_list.append(feature.GetField("SpeciesID"))
             feature = layer.GetNextFeature()
-        dataSource.SyncToDisk()
         feature = None
         layer = None
         dataSource = None
-        outdir = os.path.dirname(os.path.realpath(path))
-        output = os.path.join(outdir, "class_encoding.csv")
-        import csv
-        with open(output, "w", newline = "") as out:
-            wr = csv.writer(out)
-            wr.writerows(zip(["ClassID"], ["Encoded"]))
-            wr.writerows(zip(classes, range(len(classes))))
-    
-    ## get data and create masks and tiles
-    import numpy as np
-    from osgeo import gdal, ogr, osr
-    from osgeo.gdal_array import CopyDatasetInfo, BandReadAsArray
-    def blacken(data, mask, NoDataVal, outFile = "/vsimem/Blackened.tif"):
-        dat = gdal.Open(data, gdal.GA_ReadOnly)
-        msk = gdal.Open(mask, gdal.GA_ReadOnly)
-        bm = msk.GetRasterBand(1)
-        am = BandReadAsArray(bm)
-        null = np.where(am == NoDataVal)
-        am = None
-        bm = None
-        msk = None
-        drv = gdal.GetDriverByName("GTiff")
-        new = drv.Create(outFile, dat.RasterXSize, dat.RasterYSize,
-                         dat.RasterCount, dat.GetRasterBand(1).DataType)
-        CopyDatasetInfo(dat, new)
-        for b in range(dat.RasterCount):
-            band = dat.GetRasterBand(b+1)
-            a = BandReadAsArray(band)
-            a[null] = 0
-            new.GetRasterBand(b+1).WriteArray(a)
-            #new.GetRasterBand(b).SetNoDataValue(NoDataVal)
-            a = None
-        new.FlushCache()
-        dat = None
-        return new
-    
-    def check_version(file, derived_from):
-        ### expects pathlib path list
-        if len(file) < 1:
-            return None
-        elif len(derived_from) < 1:
-            print("Please pass a valid path to the derived_from argument.")
-        else:
-            file_mod = file[0].stat().st_mtime
-            from_mod = derived_from[0].stat().st_mtime
-            return (file_mod > from_mod)
-    
-    ## download image extents shapefile
+    class_set = set(class_list)
+    classes = list(class_set)
+    return(classes)
+
+def encode_classes(path, classes, custom_dict = None):
+    from osgeo import ogr
+    drv = ogr.GetDriverByName("ESRI Shapefile")
+    ## create new field
+    dataSource = drv.Open(path, 1)
+    FDef = ogr.FieldDefn("Class", ogr.OFTInteger)
+    layer = dataSource.GetLayer()
+    exists = layer.GetLayerDefn().GetFieldIndex("Class") >= 0
+    if not exists:
+        layer.CreateField(FDef)
+    feature = layer.GetNextFeature()
+    while feature:
+        spec = feature.GetField("SpeciesID")
+        c = classes.index(spec) if custom_dict is None else\
+            custom_dict.loc[custom_dict.SpeciesID == spec, "Class"].item()
+        feature.SetField("Class", c)
+        layer.SetFeature(feature)
+        feature = layer.GetNextFeature()
+    dataSource.SyncToDisk()
+    feature = None
+    layer = None
+    dataSource = None
+    outdir = os.path.dirname(os.path.realpath(path))
+    output = os.path.join(outdir, "class_encoding.csv")
+    import csv
+    with open(output, "w", newline = "") as out:
+        wr = csv.writer(out)
+        wr.writerows(zip(["ClassID"], ["Encoded"]))
+        wr.writerows(zip(classes, range(len(classes))))
+
+## get data and create masks and tiles
+import numpy as np
+from osgeo import gdal, ogr, osr
+from osgeo.gdal_array import CopyDatasetInfo, BandReadAsArray
+def blacken(data, mask, NoDataVal, outFile = "/vsimem/Blackened.tif"):
+    dat = gdal.Open(data, gdal.GA_ReadOnly)
+    msk = gdal.Open(mask, gdal.GA_ReadOnly)
+    bm = msk.GetRasterBand(1)
+    am = BandReadAsArray(bm)
+    null = np.where(am == NoDataVal)
+    am = None
+    bm = None
+    msk = None
+    drv = gdal.GetDriverByName("GTiff")
+    new = drv.Create(outFile, dat.RasterXSize, dat.RasterYSize,
+                     dat.RasterCount, dat.GetRasterBand(1).DataType)
+    CopyDatasetInfo(dat, new)
+    for b in range(dat.RasterCount):
+        band = dat.GetRasterBand(b+1)
+        a = BandReadAsArray(band)
+        a[null] = 0
+        new.GetRasterBand(b+1).WriteArray(a)
+        #new.GetRasterBand(b).SetNoDataValue(NoDataVal)
+        a = None
+    new.FlushCache()
+    dat = None
+    return new
+
+def check_version(file, derived_from):
+    ### expects pathlib path list
+    if len(file) < 1:
+        return None
+    elif len(derived_from) < 1:
+        print("Please pass a valid path to the derived_from argument.")
+    else:
+        file_mod = file[0].stat().st_mtime
+        from_mod = derived_from[0].stat().st_mtime
+        return (file_mod > from_mod)
+
+# Update extents if required---------------------------------------------------
+if not extent_from_shapefile:
     if not os.path.isfile(os.path.join(dir_shp("Extents", mdate = date),
                                    "Extents.shp")):
         last_modified = None
@@ -417,7 +426,14 @@ for set_X, set_y, use_plots in zip(["X", "X_val"], ["y", "y_val"],\
     import re
     with open(f"{os.path.splitext(ExtUTM)[0]}.prj", "w") as f:
         f.write(re.sub(" +", " ",str(crs).replace("\n", "")))
-    
+
+# Iterate through image lists--------------------------------------------------
+from PIL import Image#for comparison of image dimensions
+for set_X, set_y, use_plots in zip(["X", "X_val", "X_tst"], \
+                                   ["y", "y_val", "y_tst"], \
+                                   [trn_plots, val_plots, tst_plots]):
+    delete_old_tiles = True
+
     # run for each image or plot
     for plot in use_plots:
         ### update shapefile if required
@@ -445,6 +461,7 @@ for set_X, set_y, use_plots in zip(["X", "X_val"], ["y", "y_val"],\
                 range(int(specdict["Class"].max() + 1))
         save_dataset_info(variables = [classes, classes_decoded, NoDataValue,\
                               no_data_class, abc])
+    print("Using background value " + str(NoDataValue))
     
     for plot in use_plots:
         shp_path = list(pathlib.Path(dir_shp(plot, mdate = date)) \
@@ -497,7 +514,7 @@ for set_X, set_y, use_plots in zip(["X", "X_val"], ["y", "y_val"],\
             drv = ogr.GetDriverByName("ESRI Shapefile")
             shp = drv.Open(sUTM)
             layer = shp.GetLayer()
-            extent_from_shapefile = False
+
             if extent_from_shapefile:
                 x_min, x_max, y_min, y_max = (sys.maxsize, 0, sys.maxsize, 0)
                 feature = layer.GetNextFeature()
