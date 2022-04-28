@@ -179,6 +179,7 @@ else:
 
 ### general directory functions------------------------------------------------
 import numpy as np
+import re
 if wd == "home":
     if OS == "Linux":
         if platform.release() == "4.18.0-193.60.2.el8_2.x86_64":
@@ -196,35 +197,49 @@ elif wd == "":
 else:
     wd = args.wd
 
-def dir_fig(fig_id = None):
-    if fig_id == None:
-        return os.path.join(wd, "fig")
+def dir_fig(*args):
+    fig_dir = os.path.join(wd, "fig")
+    if len(args) == 0:
+        return fig_dir
     else:
-        return os.path.join(wd, "fig", fig_id)
+        fig_id = "/".join(args)
+        fig_id = re.split("[,/+ ]", fig_id)
+        return os.path.join(fig_dir, *fig_id)
 
-def dir_dat(dat_id = None):
-    if dat_id == None:
+def dir_dat(*args):
+    if len(args) == 0:
         return os.path.join(wd, "dat")
     else:
-        dat_id = dat_id.split(",")
+        dat_id = "/".join(args)
+        dat_id = re.split("[,/+ ]", dat_id)
         return os.path.join(wd, "dat", *dat_id)
 
-def dir_out(*out_id):
-    outdir = os.path.join(wd, "out", year)
-    if not os.path.isdir(outdir):
-        os.makedirs(outdir)
-    if len(out_id) < 1:
-        return os.path.join(wd, "out", year)
+def dir_xls(*args):
+    xls_dir = dir_dat("xls")
+    if len(args) == 0:
+        return xls_dir
     else:
-        out_lst = list(out_id)
-        out_ids = os.path.sep.join(out_lst)
-        return os.path.join(wd, "out", year, out_ids)
+        xls_id = "/".join(args)
+        xls_id = re.split("[,/+ ]", xls_id)
+        return os.path.join(xls_dir, *xls_id)
+
+def dir_out(*args):
+    out_dir = os.path.join(wd, "out", year, mod)
+    if not os.path.isdir(out_dir):
+        os.makedirs(out_dir)
+    if len(args) == 0:
+        return out_dir
+    else:
+        out_id = "/".join(args)
+        out_id = re.split("[,/+ ]", out_id)
+        return os.path.join(out_dir, *out_id)
 
 def dir_var(pkl_name = None):
+    var_dir = os.path.join(wd, "py3", "vrs")
     if pkl_name == None:
-        return os.path.join(wd, "py3", "vrs")
+        return var_dir
     else:
-        return os.path.join(wd, "py3", "vrs", pkl_name + ".pkl")
+        return os.path.join(var_dir, pkl_name + ".pkl")
 
 def save_var(variables, name):
     os.makedirs(dir_var(), exist_ok = True)
@@ -257,17 +272,18 @@ def debug_cp(line, debug = args.debug):
 #### data preparation directory functions--------------------------------------
 def dir_omk(plot_id = None, myear = None, type_ext = ""):
     # returns list!
+    omk_dir = dir_dat("omk")
     if plot_id == None:
         if myear == None:
-            return dir_dat("omk")
+            return omk_dir
         else:
-            return os.path.join(dir_dat("omk"), myear)
+            return os.path.join(omk_dir, myear)
     else:
         if myear == None:
-            return list(pathlib.Path(dir_dat("omk")) \
+            return list(pathlib.Path(omk_dir) \
                         .glob("**/*" + plot_id + type_ext + ".tif"))
         else:
-            return list(pathlib.Path(os.path.join(dir_dat("omk"), myear)) \
+            return list(pathlib.Path(os.path.join(omk_dir, myear)) \
                         .glob("**/*" + plot_id + type_ext + ".tif"))
 
 def dir_tls(myear = None, dset = None, plot_id = None):
@@ -295,14 +311,14 @@ def dir_tls(myear = None, dset = None, plot_id = None):
             else:
                 return os.path.join(dir_dat("tls"), myear, dset, "0", plot_id)
 
-def save_dataset_info(variables, year = year, name = "dset_info"):
+def save_dataset_info(variables, year = year, info = "dset_info"):
     tile_dir = dir_tls(myear = year)
     os.makedirs(tile_dir, exist_ok = True)
-    with open(tile_dir + os.path.sep + name + ".pkl", "wb") as f:
+    with open(tile_dir + os.path.sep + info + ".pkl", "wb") as f:
         pickle.dump(variables, f)
 
-def get_dataset_info(dataset = year, name = "dset_info"):
-    inf_dir = os.path.join(dir_tls(myear = dataset), name + ".pkl")
+def get_dataset_info(dataset = year, info = "dset_info"):
+    inf_dir = os.path.join(dir_tls(myear = dataset), info + ".pkl")
     with open(inf_dir, "rb") as f:
         return pickle.load(f)
 
@@ -344,7 +360,7 @@ if args.imgd is not None:
 ### Run file DataPreparation.py
 ###  read dictionary to group species to classes, if need be
 import pandas as pd
-specdict = pd.read_excel(dir_dat("xls,SpeciesList.xlsx"),
+specdict = pd.read_excel(dir_xls("SpeciesList.xlsx"),
                          sheet_name = "Dictionary", header = 0)
 # exec(open("A1_DataPreparation.py").read())
 
@@ -356,7 +372,6 @@ if args.nc is not None:
     N_CLASSES = args.nc
 
 # Setup for training-----------------------------------------------------------
-os.chdir(os.path.join(wd, "py3"))
 os.chdir(wd)
 
 # import modules---------------------------------------------------------------
@@ -434,7 +449,7 @@ if lc == 0:
         return input_image, input_mask
 else:
     print("Adjusting classes (lowest value != 0). This slows down training.")
-    lwst_cls = tf.convert_to_tensor(lc, dtype=tf.uint8)
+    lwst_cls = tf.convert_to_tensor(lc, dtype = tf.uint8)
     @tf.function
     def normalise(input_image: tf.Tensor, input_mask: tf.Tensor) -> tuple:
         input_image = tf.cast(input_image, tf.float32) / 255.0
@@ -462,7 +477,8 @@ def load_image_train(datapoint: dict) -> tuple:
     ###########################################################################
     ## experimental augmentation
     # random rotation
-    angle = np.random.rand(1) * 2 * np.pi
+    #'''
+    angle = np.random.rand(1) * 2.0 * np.pi
     input_image = tfa.image.rotate(input_image, \
                                    angle, \
                                        interpolation = "nearest", \
@@ -475,26 +491,28 @@ def load_image_train(datapoint: dict) -> tuple:
     # random scaling (do not use): = ((tf.random.uniform(()) * 0.2) + 0.8)
     # added 1, divided by 2 to reduce filled area while keeping resize at not
     # too extreme zoom levels
-    scaling = (np.sqrt(1 + np.sin(2 * angle)) + 1) / 2
+    scaling = (np.sqrt(1.0 + np.abs(np.sin(angle / 2))) + 1) / 2
     input_image = tf.image.resize(input_image, \
-                                        (int(imgr * scaling), \
-                                         int(imgc * scaling)), \
-                                        method = "lanczos3")
+                                  (int(imgr * scaling), \
+                                   int(imgc * scaling)), \
+                                      method = "lanczos3")
     input_mask = tf.image.resize(input_mask, \
-                                        (int(imgr * scaling), \
-                                         int(imgc * scaling)), \
-                                        method = "nearest")
+                                 (int(imgr * scaling), \
+                                  int(imgc * scaling)), \
+                                     method = "nearest")
     # clip to original size (central crop as fraction of scaled image)
+    fraction = np.clip(1.0 / scaling, 1.0 / (imgr * scaling), 1.0)
     input_image = tf.image.central_crop(input_image, \
-                                        central_fraction = 1 / scaling)
+                                        central_fraction = fraction)
     input_mask = tf.image.central_crop(input_mask, \
-                                       central_fraction = 1 / scaling)
+                                       central_fraction = fraction)
     # resize to original size (not as fraction but fix int value) to make sure
     # images have the original resolution (prevent potential rounding errors)
     input_image = tf.image.resize(input_image, (imgr, imgc), \
                                   method = "lanczos3")
     input_mask = tf.image.resize(input_mask, (imgr, imgc), \
                                   method = "nearest")
+    #'''
     ###########################################################################
     # normalise images
     input_image, input_mask = normalise(input_image, input_mask)
@@ -504,8 +522,8 @@ def load_image_train(datapoint: dict) -> tuple:
                                            upper = 1.25)
     input_image = tf.image.random_saturation(input_image, lower = 0.75, \
                                            upper = 1.25)
-    input_image = tf.clip_by_value(input_image, clip_value_min = 0, \
-                                   clip_value_max = 1)
+    input_image = tf.clip_by_value(input_image, clip_value_min = 0.0, \
+                                   clip_value_max = 1.0)
     return input_image, input_mask
 
 @tf.function
@@ -587,10 +605,10 @@ else:
 
 import glob, time
 debug_cp(line = "Calculate weights...")
-if ww != 0:
+if ww != 0.0:
     if os.path.isfile(os.path.join(dir_tls(myear = year), "weights.pkl")):
         print("Loading class weights...")
-        WEIGHTS, weights_timestamp = get_dataset_info(name = "weights")
+        WEIGHTS, weights_timestamp = get_dataset_info(info = "weights")
         print("Checking class weights timestamp...")
         latest_mod = max(glob.glob(dir_tls(myear = year, dset = "y") + \
                                    os.path.sep + "*"), key = os.path.getctime)
@@ -602,20 +620,20 @@ if ww != 0:
                 os.path.dirname(dir_tls(myear = year, dset = "y")), N_CLASSES)
             weights_timestamp = datetime.datetime.now()
             save_dataset_info(variables = [WEIGHTS, weights_timestamp],
-                     name = "weights")
+                     info = "weights")
     else:
         print("Calculating class weights...")
         WEIGHTS = calculate_weights(os.path.dirname( \
             dir_tls(myear = year, dset = "y")), N_CLASSES)
         weights_timestamp = datetime.datetime.now()
         save_dataset_info(variables = [WEIGHTS, weights_timestamp],
-                     name = "weights")
+                     info = "weights")
     NORMWEIGHTS = WEIGHTS / max(WEIGHTS)
     ### inverse frequency as weights
     #inv_weights = tf.constant((1 / (WEIGHTS + 0.01)), dtype = tf.float32,
     #                          shape = [1, 1, 1, N_CLASSES])
     import math
-    inv_weights = (1 / (NORMWEIGHTS + 0.01)**(ww)) if ws == "exp" else \
+    inv_weights = (1 / ((NORMWEIGHTS + 0.01)**(ww))) if ws == "exp" else \
         [1 / math.log(nw, ww) for nw in NORMWEIGHTS]
     inv_weights = inv_weights / max(inv_weights)
     print("Calculated the following weights:", inv_weights)
@@ -632,13 +650,12 @@ if ww != 0:
 
 # Get model--------------------------------------------------------------------
 debug_cp(line = "Get model...")
-os.chdir(os.path.join(wd, "py3"))
 if kernel_init is not None:
     k_initializers = { \
         "he_normal" : "he_normal", \
         "he_uniform" : "he_uniform", \
-        "random_uniform" : ks.initializers.RandomUniform(minval = 0.,\
-                                                         maxval = 1.), \
+        "random_uniform" : ks.initializers.RandomUniform(minval = 0.0,\
+                                                         maxval = 1.0), \
         "truncated_normal" : ks.initializers.TruncatedNormal(mean = 0.0, \
                                                              stddev = 0.05) \
             }
@@ -743,15 +760,15 @@ if mod == "mod_UNet":
 
     # get model
     model = UNet(n_classes = N_CLASSES)
-    
-    # directory to save model
-    os.makedirs(dir_out("mod_UNet"), exist_ok = True)
+
     #-------------------------------------------------------------------------
     # FCDenseNet
 elif mod == "mod_FCD":
     if kernel_init is None:
         # following Jegou et al (2017)
         initializer = ks.initializers.HeUniform() # or "he_uniform"
+    else:
+        initializer = kernel_init
     def BN_ReLU_Conv(inputs, n_filters, filter_size = 3, dropout_p = drop):
         l = ks.layers.BatchNormalization()(inputs)
         l = ks.layers.Activation("relu")(l)
@@ -878,13 +895,14 @@ elif mod == "mod_FCD":
     # get model
     model = FCDense(n_classes = N_CLASSES)
     
-    # directory to save model
-    os.makedirs(dir_out("mod_FCD"), exist_ok = True)
-    
     #-------------------------------------------------------------------------
     # DeepLab V3
 elif mod == "mod_DL3":
     # https://keras.io/examples/vision/deeplabv3_plus/
+    if kernel_init is None:
+        initializer = ks.initializers.HeNormal() # or "he_normal"
+    else:
+        initializer = kernel_init
     def convolution_block(
         block_input,
         num_filters = 256,
@@ -899,7 +917,7 @@ elif mod == "mod_DL3":
             dilation_rate = dilation_rate,
             padding = "same",
             use_bias = use_bias,
-            kernel_initializer = ks.initializers.HeNormal(),
+            kernel_initializer = initializer,
         )(block_input)
         x = ks.layers.BatchNormalization()(x)
         return tf.nn.relu(x)
@@ -928,7 +946,7 @@ elif mod == "mod_DL3":
         output = convolution_block(x, kernel_size = 1)
         return output
 
-    def DeeplabV3Plus(image_size, num_classes):
+    def DeeplabV3Plus(image_size, n_classes):
         inputz = ks.Input(shape = (image_size, image_size, 3))
         resnet50 = ks.applications.ResNet50(
             weights = "imagenet", include_top = False, \
@@ -952,15 +970,12 @@ elif mod == "mod_DL3":
             size = (image_size // x.shape[1], image_size // x.shape[2]),
             interpolation = "bilinear",
         )(x)
-        outputz = ks.layers.Conv2D(num_classes, kernel_size = (1, 1), \
+        outputz = ks.layers.Conv2D(n_classes, kernel_size = (1, 1), \
                                      padding = "same")(x)
         return ks.Model(inputs = inputz, outputs = outputz)
     
     # get model
-    model = DeeplabV3Plus(image_size = imgr, num_classes = N_CLASSES)
-
-    # directory to save model
-    os.makedirs(dir_out("mod_DL3"), exist_ok = True)
+    model = DeeplabV3Plus(image_size = imgr, n_classes = N_CLASSES)
 
 ### logs and callbacks---------------------------------------------------------
 # define callbacks
@@ -1064,7 +1079,7 @@ def dice_loss(y_true, y_pred):
 ## metrics
 ### get intersect. over union (original function gives error -> updated accor-
 ### ding to https://stackoverflow.com/a/61826074/11611246)
-# mIoU = ks.metrics.MeanIoU(num_classes = N_CLASSES)
+# mIoU = ks.metrics.MeanIoU(n_classes = N_CLASSES)
 class MulticlassMeanIoU(tf.keras.metrics.MeanIoU):
     def __init__(self,
                  y_true = None,
@@ -1096,6 +1111,9 @@ lozz = ks.losses.SparseCategoricalCrossentropy() if N_CLASSES > 2 else\
     ks.losses.BinaryCrossentropy()
 
 #run_opts = tf.compat.v1.RunOptions(report_tensor_allocations_upon_oom = True)
+
+# create output directory------------------------------------------------------
+os.makedirs(dir_out(), exist_ok = True)
 
 # resume training or compile new model-----------------------------------------
 if resume_training == "f":
@@ -1178,7 +1196,7 @@ if "train_generator" in locals() or "train_generator" in globals():
     '''
     Warning("Currently no Keras ImageDataGenerators supported.")
 else:
-    if ww != 0:
+    if ww != 0.0:
         model.fit(dataset["train"].map(add_sample_weights),
                          validation_data = dataset["val"],
                          **args_fit)
@@ -1190,105 +1208,5 @@ else:
 os.chdir(dir_out())
 
 # save model-------------------------------------------------------------------
-os.makedirs(dir_out(mod), exist_ok = True)
-model.save(dir_out(mod), save_format = "tf", save_traces = True)
+model.save(dir_out(), save_format = "tf", save_traces = True)
 print("Model saved to disc.")
-
-#model = ks.models.load_model(dir_out(mod),\
-#                             custom_objects = {"MulticlassMeanIoU": mIoU})
-
-# Test results-----------------------------------------------------------------
-moddir = dir_out(mod)
-from matplotlib import pyplot as plt
-from matplotlib.colors import Normalize
-
-def display_sample(display_list, tst = "a"):
-    """Show side-by-side an input image,
-    the ground truth and the prediction.
-    """
-    plt.figure(figsize = (18, 18))
-
-    title = ["Input Image", "True Mask", "Predicted Mask"]
-    plt.subplot(1, len(display_list), 1)
-    plt.title(title[0])
-    plt.imshow(tf.keras.preprocessing.image.array_to_img(display_list[0]))
-    plt.axis("off")
-    for i in range(1, len(display_list)):
-        plt.subplot(1, len(display_list), i+1)
-        plt.title(title[i])
-        plt.imshow(tf.keras.preprocessing.image.array_to_img(display_list[i],\
-                                                             scale = False),
-                   interpolation = "nearest",
-                   cmap = plt.get_cmap("gist_rainbow"),#norm = Normalize(
-                   vmin = 0, vmax = N_CLASSES)#)
-        plt.axis("off")
-    plt.show()
-    plt.savefig(os.path.join(moddir, "Test" + tst + ".png"))
-
-def create_mask(pred_mask: tf.Tensor) -> tf.Tensor:
-    pred_mask = tf.argmax(pred_mask, axis = -1)
-    pred_mask = tf.expand_dims(pred_mask, axis = -1)
-    return pred_mask
-
-def show_predictions(dataset = None, num = 1, t = "a"):
-    if dataset:
-        for image, mask in dataset.take(num):
-            pred_mask = model.predict(image)
-            display_sample([image[0], true_mask, create_mask(pred_mask)])
-    else:
-        one_img_batch = sample_image[0][tf.newaxis, ...]
-        inference = model.predict(one_img_batch)
-        pred_mask = create_mask(inference)
-        display_sample([sample_image[0], sample_mask[0],
-                        pred_mask[0]], tst = t)
-
-# Mask and prediction
-for test in map(chr, range(*map(ord, ["a", "n"]))):
-    if "val_generator" in globals():
-        sample_image, sample_mask = next(val_generator)
-    else:
-        for image, mask in dataset["val"].take(1):
-            sample_image, sample_mask = image, mask
-    show_predictions(t = test)
-    mask_array = np.array(sample_mask[0])
-    inference = model.predict(np.expand_dims(sample_image[0], axis = 0))
-    pred = create_mask(inference)
-    y_pred, y_true = inference[0], sample_mask[0]
-    mask_vals, mask_counts = np.unique(mask_array, return_counts = True)
-    pred_vals, pred_counts = np.unique(pred, return_counts = True)
-    print("Mask classes:\n", mask_vals)
-    print("Frequencies:\n", mask_counts)
-    print("Predicted classes:\n", pred_vals)
-    print("Frequencies:\n", pred_counts)
-
-# Confusion matrix
-def compute_confusion_matrix_sample(image, mask, cnn):
-    true_array = np.array(mask[0]).astype(int)
-    pred = cnn.predict(np.expand_dims(image[0], axis = 0))
-    pred_array = create_mask(pred)
-    pred_array = np.squeeze(pred_array, axis = 0)
-    K = pred.shape[-1] 
-    matrix = np.zeros((K, K))
-    true_array = true_array.ravel()
-    pred_array = pred_array.ravel()
-    for clss in range(len(true_array)):
-        matrix[true_array[clss]][pred_array[clss]] += 1
-    return matrix
-
-for i in range(1, 500):
-    for image, mask in dataset["val"].take(1):
-            sample_image, sample_mask = image, mask
-    if "confusion_matrix" in globals():
-        confusion_matrix = confusion_matrix.__add__(\
-                        compute_confusion_matrix_sample(sample_image,\
-                                                        sample_mask,\
-                                                            model))
-    else:
-        confusion_matrix = compute_confusion_matrix_sample(sample_image,\
-                                                           sample_mask,\
-                                                               model)
-np.savetxt(os.path.join(moddir, "confusion_matr.csv"),\
-           confusion_matrix, delimiter = "\t")
-
-plt.matshow(confusion_matrix, cmap = plt.cm.gray_r)
-plt.savefig(dir_out("Confusion" + ".png"))
