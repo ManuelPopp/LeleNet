@@ -13,7 +13,11 @@
 #
 module purge
 module load devel/cuda/11.4
+mkdir -p $TMP/dat/tls
+cp -r $HOME/LeleNet/dat/tls/1024_best $TMP/dat/tls/03_2021
 source $HOME/venv/bin/activate
-python3 $HOME/LeleNet/py3/LeleNet_trn.py "fcd" 1 50 -yr "1024_3_class_EbLd" -ww 0.5 -op "adam"
+python3 $HOME/LeleNet/py3/LeleNet_trn.py "unet" 4 45 -dd $TMP -ww 0.25 -op "rms" -dr 0.5 -lr 1e-4 -out "UNet025" -tbn "UNet025"
+python3 $HOME/LeleNet/py3/LeleNet_trn.py "unet" 4 45 -dd $TMP -ww 0.50 -op "rms" -dr 0.5 -lr 1e-4 -out "UNet050" -tbn "UNet050"
+python3 $HOME/LeleNet/py3/LeleNet_trn.py "unet" 4 45 -dd $TMP -ww 1.50 -op "rms" -dr 0.5 -lr 1e-4 -out "UNet150" -tbn "UNet150"
 #python3 $HOME/LeleNet/py3/XX_Testing_and_visualisation.py
 deactivate
