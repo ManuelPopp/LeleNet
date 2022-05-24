@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon May 17 17:56:34 2021
+Created on Mon Feb 17 17:56:34 2022
 
 @author: Manuel
 Full implementation
@@ -32,6 +32,9 @@ def parseArguments():
     parser.add_argument("-lrs", "--lrs",\
                         help = "Learning rate decay step size (int).",\
                             type = int, default = 2)
+    parser.add_argument("-esm", "--esm",\
+                        help = "Early stopping metric (str).",\
+                            type = str, default = "val_loss")
     parser.add_argument("-esp", "--esp",\
                         help = "Early stopping patience (int).",\
                             type = int, default = None)
@@ -126,6 +129,8 @@ epochz = args.ep
 init_lr = args.lr
 decay_lr = args.lrd
 step_lr = args.lrs
+es_metric = args.esm
+es_mode = "min" if es_metric == "val_loss" else "max"
 es_patience = args.esp if args.esp is not None else epochz
 optmer = args.op
 kernel_init = args.ki
@@ -1027,22 +1032,15 @@ except:
     print("Failed to assign optimizer: " + optmer + \
           ". Use 'Adam', 'rms', or 'sgd'.")
 
-# list callbacks
+# create output directory------------------------------------------------------
+os.makedirs(dir_out(), exist_ok = True)
+
+# create log directory---------------------------------------------------------
 now = datetime.datetime.now()
 logdir = os.path.join(dir_out("logs"), now.strftime("%y-%m-%d-%H-%M-%S"))
 cptdir = os.path.join(dir_out("cpts"), now.strftime("%y-%m-%d-%H-%M-%S"))
 os.makedirs(logdir, exist_ok = True)
 os.makedirs(cptdir, exist_ok = True)
-
-cllbs = [
-    #ks.callbacks.ReduceLROnPlateau(monitor = "val_loss", factor = 0.2,
-    #                               patience = 5, min_lr = 0.001),
-    ks.callbacks.EarlyStopping(patience = es_patience),
-    ks.callbacks.ModelCheckpoint(os.path.join(cptdir, \
-                                              "Epoch.{epoch:02d}.hdf5"),
-                                 save_best_only = True),
-    ks.callbacks.TensorBoard(log_dir = logdir, histogram_freq = 5)
-    ]
 
 # compile model----------------------------------------------------------------
 ## loss functions
@@ -1092,10 +1090,11 @@ class MulticlassMeanIoU(tf.keras.metrics.MeanIoU):
                  y_true = None,
                  y_pred = None,
                  num_classes = None,
-                 name = None,
+                 name = "MultiMeanIoU",
                  dtype = None):
         super(MulticlassMeanIoU, self).__init__(num_classes = num_classes,
                                              name = name, dtype = dtype)
+        self.__name__ = name
 
     def update_state(self, y_true, y_pred, sample_weight = None):
         y_pred = tf.math.argmax(y_pred, axis = -1)
@@ -1103,12 +1102,12 @@ class MulticlassMeanIoU(tf.keras.metrics.MeanIoU):
 
 if mk == "f1":
     met = tfa.metrics.F1Score(num_classes = N_CLASSES, threshold = 0.5)
+    met.__name__ = "f1"
     print("Using metric f1-score")
 else:
     mIoU = MulticlassMeanIoU(num_classes = N_CLASSES)
     met = MulticlassMeanIoU(num_classes = N_CLASSES)
     print("Using metric mIoU")
-#met = f1 if args.mx.casefold() == "f1" else mIoU
 
 metrix = [met, "sparse_categorical_accuracy"] if N_CLASSES > 2 else \
     [met, "accuracy"]
@@ -1119,8 +1118,20 @@ lozz = ks.losses.SparseCategoricalCrossentropy() if N_CLASSES > 2 else\
 
 #run_opts = tf.compat.v1.RunOptions(report_tensor_allocations_upon_oom = True)
 
-# create output directory------------------------------------------------------
-os.makedirs(dir_out(), exist_ok = True)
+# callbacks--------------------------------------------------------------------
+cllbs = [
+    #ks.callbacks.ReduceLROnPlateau(monitor = "val_loss", factor = 0.2,
+    #                               patience = 5, min_lr = 0.001),
+    ks.callbacks.EarlyStopping(monitor = es_metric, mode = es_mode, \
+                               patience = es_patience, verbose = 1),
+    ks.callbacks.ModelCheckpoint(os.path.join(cptdir, \
+                                              "Epoch.{epoch:02d}.hdf5"), \
+                                 monitor = "val_" + met.__name__, \
+                                 mode = "max", \
+                                 save_best_only = True, \
+                                 save_freq = 1),
+    ks.callbacks.TensorBoard(log_dir = logdir, histogram_freq = 5)
+    ]
 
 # resume training or compile new model-----------------------------------------
 if resume_training == "f":
