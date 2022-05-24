@@ -5,7 +5,7 @@ Created on Mon Feb 17 17:56:34 2022
 
 @author: Manuel
 Full implementation
-runfrom terminal: python ~/LeleNet/py3/LeleNet_trn.py "U-Net" 10 40
+run in terminal: python3 ~/LeleNet/py3/LeleNet_trn.py "U-Net" 10 40
 """
 __author__ = "Manuel R. Popp"
 
