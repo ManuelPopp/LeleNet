@@ -1,33 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon May 17 17:56:34 2021
+Created on Mon Feb 17 17:56:34 2022
 
 @author: Manuel
 Set general functions and variables.
 """
 __author__ = "Manuel R. Popp"
-
-trn_plots = []
-'''
-["B1_6_0003", "B1_6_0023", "B1_6_0063", "B1_6_0078", "B1_6_0086",\
-             "B1_6_0119", "B1_6_0136", "B1_6_0140", "B1_6_0151", "B1_6_0181",\
-             "B1_6_0198", "B1_6_0209", "B1_6_0239", "B1_6_0256", "B1_6_0428",\
-             "B1_6_0447", "B1_6_0480", "B1_6_0417", "B1_6_0498", "B2_2_0043",\
-             "B2_2_0053", "B2_2_0096", "B2_2_0123", "B2_2_0157", "B2_2_0166",\
-             "B3_4_0084", "B3_4_0096", "B3_4_0213", "B3_4_0230", "B4_5_0053",\
-             "B4_5_0061", "B4_5_0157", "B4_5_0166", "B5_4_0550", "B5_4_0560",\
-             "B5_4_0657", "B5_4_0665", "B6_4_0554", "B6_4_0560", "B6_4_0624",\
-             "B6_4_0650", "B7_6_0452", "B7_6_0463", "B8_4_0080", "B8_4_0088"]#, "B7_6_0583", "B7_6_0590", "B8_4_0192", "B8_4_0205"]
-'''
-val_plots = []
-'''
-["B1_6_0286", "B1_6_0267", "B2_2_0061", "B2_2_0131", "B2_2_0148",\
-             "B3_4_0065", "B3_4_0192", "B4_5_0044", "B4_5_0149", "B5_4_0542",\
-             "B5_4_0647", "B6_4_0544", "B6_4_0615",  "B7_6_0482", "B8_4_0060"]#, "B7_6_0598", "B8_4_0174"]
-'''
-tst_plots = ["ortho_B1_2", "ortho_B1_3", "ortho_B1_4", "ortho_B1_5"]
-all_plots = trn_plots + val_plots + tst_plots
 
 #### parse arguments-----------------------------------------------------------
 import argparse
@@ -40,6 +19,10 @@ def parseArguments():
                         help = ("Sampling date of the data" +\
                                 "as MM_YYYY. Default: '03_2021'"),\
                             type = str, default = "03_2021")
+    parser.add_argument("-name", "--name",\
+                        help = ("Alternative name for the dataset folder." +\
+                                " Defaults to -date."),\
+                            type = str, default = None)
     parser.add_argument("-xf", "--xf",\
                         help = "RGB image format; either png, jpg, or tif.",\
                             type = str, default = "png")
@@ -70,10 +53,18 @@ def parseArguments():
     parser.add_argument("-wd", "--wd",\
                         help = "Alternative working directory.", type = str,\
                             default = "")
+    parser.add_argument("-dd", "--dd",\
+                        help = "Alternative data directory.", type = str,\
+                            default = None)
     parser.add_argument("-add", "--add",\
                         help = "Add data for new plots without deleting ol" +\
                         "d data.", type = bool,\
                             default = True)
+    parser.add_argument("-mode", "--mode",\
+                        help = "Mode: Create tiles from originals or from " +\
+                            "orthomosaic. Select either 'raw' or 'ortho' " +\
+                                "(default).",\
+                            type = str, default = "ortho")
     # Parse arguments
     args = parser.parse_args()
     return args
@@ -81,21 +72,24 @@ if __name__ == "__main__":
     # Parse the arguments
     args = parseArguments()
 
+date = args.date
+name = args.name if args.name is not None else date
 xf = args.xf
 yf = args.yf
 xf, yx = xf.casefold(), yf.casefold()
 imgr = args.imgr
 imgc = args.imgc
 imgd = args.imgd
-date = args.date
 no_data_class = args.ndc
 additional_background_class = args.abc
 abc = True if additional_background_class >= 0 else False
 group_species = args.grp
 mark_bad_data = args.mbd
-wd = "home"
 wd = args.wd
+dd = args.dd
 just_add = args.add
+mode = args.mode
+mode = mode.casefold()
 extent_from_shapefile = False
 
 if imgd is not None:
@@ -114,7 +108,9 @@ print("Running on " + OS + " " + OS_version + ".\nPython version: " +
       "\nLocal time (start): " + str(datetime.datetime.now()))
 
 ### general directory functions------------------------------------------------
-import os, pickle
+import os
+import re
+import pickle
 import numpy as np
 if wd == "home":
     if OS == "Linux":
@@ -131,30 +127,49 @@ else:
 
 print("wd: " + wd)
 
-def dir_fig(fig_id = None):
-    if fig_id == None:
-        return os.path.join(wd, "fig")
-    else:
-        return os.path.join(wd, "fig", fig_id)
+dd = wd if dd == None else dd
 
-def dir_dat(dat_id = None):
-    if dat_id == None:
-        return os.path.join(wd, "dat")
+def dir_fig(*args):
+    fig_dir = os.path.join(wd, "fig")
+    if len(args) == 0:
+        return fig_dir
     else:
-        dat_id = dat_id.split(",")
-        return os.path.join(wd, "dat", *dat_id)
+        fig_id = "/".join(args)
+        fig_id = re.split("[,/+ ]", fig_id)
+        return os.path.join(fig_dir, *fig_id)
 
-def dir_out(out_id = None):
-    if out_id == None:
-        return os.path.join(wd, "out")
+def dir_dat(*args):
+    if len(args) == 0:
+        return os.path.join(dd, "dat")
     else:
-        return os.path.join(wd, "out", out_id)
+        dat_id = "/".join(args)
+        dat_id = re.split("[,/+ ]", dat_id)
+        return os.path.join(dd, "dat", *dat_id)
+
+def dir_xls(*args):
+    xls_dir = dir_dat("xls")
+    if len(args) == 0:
+        return xls_dir
+    else:
+        xls_id = "/".join(args)
+        xls_id = re.split("[,/+ ]", xls_id)
+        return os.path.join(xls_dir, *xls_id)
+
+def dir_out(*args):
+    out_dir = os.path.join(wd, "out")
+    if len(args) == 0:
+        return out_dir
+    else:
+        out_id = "/".join(args)
+        out_id = re.split("[,/+ ]", out_id)
+        return os.path.join(out_dir, *out_id)
 
 def dir_var(pkl_name = None):
+    var_dir = os.path.join(wd, "py3", "vrs")
     if pkl_name == None:
-        return os.path.join(wd, "py3", "vrs")
+        return var_dir
     else:
-        return os.path.join(wd, "py3", "vrs", pkl_name + ".pkl")
+        return os.path.join(var_dir, pkl_name + ".pkl")
 
 def save_var(variables, name):
     os.makedirs(dir_var(), exist_ok = True)
@@ -167,58 +182,61 @@ def get_var(name):
     
 os.chdir(wd)
 
-
 #### data preparation directory functions--------------------------------------
 import pathlib
-def dir_omk(plot_id = None, mdate = None, type_ext = ""):
+def dir_omk(plot_id = None, mdate = date, type_ext = ""):
     # returns list!
+    omk_dir = dir_dat("omk")
     if plot_id == None:
         if mdate == None:
-            return dir_dat("omk")
+            return omk_dir
         else:
-            return os.path.join(dir_dat("omk"), mdate)
+            return os.path.join(omk_dir, mdate)
     else:
         if mdate == None:
-            return list(pathlib.Path(dir_dat("omk")) \
+            return list(pathlib.Path(omk_dir) \
                         .glob("**/*" + plot_id + type_ext + ".tif"))
         else:
-            return list(pathlib.Path(os.path.join(dir_dat("omk"), mdate)) \
+            return list(pathlib.Path(os.path.join(omk_dir, mdate)) \
                         .glob("**/*" + plot_id + type_ext + ".tif"))
 
-def dir_tls(mdate = None, dset = None, plot_id = None):
+def dir_tls(dname = None, dset = None, plot_id = None):
+    tls_dir = dir_dat("tls")
     if plot_id == None:
-        if mdate == None:
+        if dname == None:
             if dset == None:
-                return dir_dat("tls")
+                return tls_dir
             else:
-                return dir_dat("tls")
+                return tls_dir
                 raise Exception("Missing date. Returning tile directory.")
         else:
             if dset == None:
-                return os.path.join(dir_dat("tls"), mdate)
+                return os.path.join(dir_dat("tls"), dname)
             else:
-                return os.path.join(dir_dat("tls"), mdate, dset, "0")
+                return os.path.join(dir_dat("tls"), dname, dset, "0")
     else:
-        if mdate == None:
-            return dir_dat("tls")
+        if dname == None:
+            return tls_dir
             raise Exception("Missing date. Returning tile directory.")
         else:
             if dset == None:
-                return os.path.join(dir_dat("tls"), mdate)
+                return os.path.join(tls_dir, dname)
                 raise Exception("Missing dset (X or y). " + \
                                 "Returning tile directory.")
             else:
-                return os.path.join(dir_dat("tls"), mdate, dset, "0", plot_id)
+                return os.path.join(tls_dir, dname, dset, "0", plot_id)
+print("Ortomosaic directory: " + dir_omk())
+print("Tile directory: " + dir_tls())
 
-def save_dataset_info(variables, date = date, name = "dset_info"):
-    tile_dir = dir_tls(mdate = date)
+def save_dataset_info(variables, date = date, info = "dset_info"):
+    tile_dir = dir_tls(dname = name)
     os.makedirs(tile_dir, exist_ok = True)
-    with open(tile_dir + os.path.sep + name + ".pkl", "wb") as f:
+    with open(tile_dir + os.path.sep + info + ".pkl", "wb") as f:
         pickle.dump(variables, f)
 
-def get_dataset_info(date = date, name = "dset_info"):
-    tile_dir = dir_tls(mdate = date)
-    with open(tile_dir + os.path.sep + name + ".pkl", "rb") as f:
+def get_dataset_info(date = date, info = "dset_info"):
+    tile_dir = dir_tls(dname = name)
+    with open(tile_dir + os.path.sep + info + ".pkl", "rb") as f:
         return pickle.load(f)
 
 def toINT(filename):
@@ -226,16 +244,35 @@ def toINT(filename):
     return imgINT
 
 # Data preparation-------------------------------------------------------------
-###  read dictionary to group species to classes, if need be
+### read dictionary to group species to classes, if need be
 import pandas as pd
-specdict = pd.read_excel(dir_dat("xls,SpeciesList.xlsx"),
+specdict = pd.read_excel(dir_xls("SpeciesList.xlsx"),
                          sheet_name = "Dictionary", header = 0)
+### read images used for training, validation, and test datasets
+if mode == "raw":
+    sheet = "Raw_images"
+elif mode == "ortho":
+    sheet = "Orthomosaics"
+else:
+    print("Invalid option: '" + mode + "' for argument '-mode'.",
+            "Switching to default: 'ortho'.")
+    sheet = "Orthomosaics"
+
+datasets = pd.read_excel(dir_xls("Datasets.xlsx"),
+                         sheet_name = sheet, header = 0)
+
+trn_plots = datasets[datasets["Usage"] == "Train"]["Name"].tolist()
+val_plots = datasets[datasets["Usage"] == "Validation"]["Name"].tolist()
+tst_plots = datasets[datasets["Usage"] == "Test"]["Name"].tolist()
+all_plots = trn_plots + val_plots + tst_plots
 
 # Define functions-------------------------------------------------------------
-## AcrGIS Online
-import arcgis, math
+## AcrGIS Online log-in
+import arcgis
 from arcgis.gis import GIS
-gis = GIS("pro")
+gis = GIS(None, "manuel.popp_KIT", "#8809manil+!", verify_cert = False)
+#gis = GIS("pro")
+
 def dir_shp(plot_id = None, mdate = None):
     if mdate == None:
         if plot_id == None:
@@ -423,12 +460,12 @@ if not extent_from_shapefile:
     ds = None
     srcDS = None
     ### write .prj file
-    import re
     with open(f"{os.path.splitext(ExtUTM)[0]}.prj", "w") as f:
         f.write(re.sub(" +", " ",str(crs).replace("\n", "")))
 
 # Iterate through image lists--------------------------------------------------
 from PIL import Image#for comparison of image dimensions
+import math
 for set_X, set_y, use_plots in zip(["X", "X_val", "X_tst"], \
                                    ["y", "y_val", "y_tst"], \
                                    [trn_plots, val_plots, tst_plots]):
@@ -474,7 +511,7 @@ for set_X, set_y, use_plots in zip(["X", "X_val", "X_tst"], \
             encode_classes(path = os.path.join(shp_path),
                            classes = classes_decoded)
         ### tif and shp path
-        t = os.path.join(dir_omk(plot)[0])
+        t = os.path.join(dir_omk(plot, mdate = date)[0])
         plib = pathlib.Path(dir_shp(plot, mdate = date))
         ### check if shapefile was transformed to UTM
         if check_version(file = list(pathlib.Path(dir_shp(plot, \
@@ -574,10 +611,12 @@ for set_X, set_y, use_plots in zip(["X", "X_val", "X_tst"], \
             layer = None
             shp = None
         else:
-            t_crop = os.path.join(dir_omk(plot, type_ext = "_CROP")[0])
-            m = os.path.join(dir_omk(plot, type_ext = "_MASK")[0])
+            t_crop = os.path.join(dir_omk(plot, mdate = date, \
+                                          type_ext = "_CROP")[0])
+            m = os.path.join(dir_omk(plot, mdate = date, \
+                                     type_ext = "_MASK")[0])
         ### check if training tiles were generated previously and are up-to-date
-        path_to_tiles = list(pathlib.Path(dir_tls(mdate = date, dset = set_y)) \
+        path_to_tiles = list(pathlib.Path(dir_tls(dname = name, dset = set_y)) \
             .glob("**/" + plot + "*_y." + yf))
         if len(path_to_tiles) >= 1:
             im = Image.open(path_to_tiles[0])
@@ -586,7 +625,7 @@ for set_X, set_y, use_plots in zip(["X", "X_val", "X_tst"], \
         else:
             w = 0
         keep_tiles = True if (just_add and w == imgc) else False
-        if check_version(file = list(pathlib.Path(dir_tls(mdate = date,
+        if check_version(file = list(pathlib.Path(dir_tls(dname = name,
                                                        dset = set_y)) \
                                   .glob("**/" + plot + "*_y." + yf)),
                       derived_from = list(pathlib.Path(dir_omk(mdate = date)).\
@@ -618,17 +657,17 @@ for set_X, set_y, use_plots in zip(["X", "X_val", "X_tst"], \
             xmin = Xmin + xoffset * res
             ycrds = [ymax - res*imgr*m for m in range(ytiles + 1)]
             xcrds = [xmin + res*imgc*n for n in range(xtiles + 1)]
-            os.makedirs(dir_tls(mdate = date, dset = set_X), exist_ok = True)
-            os.makedirs(dir_tls(mdate = date, dset = set_y), exist_ok = True)
+            os.makedirs(dir_tls(dname = name, dset = set_X), exist_ok = True)
+            os.makedirs(dir_tls(dname = name, dset = set_y), exist_ok = True)
             ### delete old files
             if delete_old_tiles:
                 old_tiles = []
-                for root, dirs, files in os.walk(dir_tls(mdate = date,\
+                for root, dirs, files in os.walk(dir_tls(dname = name,\
                                                          dset = set_X)):
                     for file in files:
                         if file.endswith(plot + "*." + xf):
                             old_tiles.append(os.path.join(root, file))
-                for root, dirs, files in os.walk(dir_tls(mdate = date,\
+                for root, dirs, files in os.walk(dir_tls(dname = name,\
                                                          dset = set_y)):
                     for file in files:
                         if file.endswith(plot + "*." + yf):
@@ -645,9 +684,9 @@ for set_X, set_y, use_plots in zip(["X", "X_val", "X_tst"], \
                     xmax = xcrds[j+1]
                     x = str(counter).zfill(8)
                     fntif = dir_tls(plot_id = plot,
-                                    mdate = date, dset = set_X) + x + "_X."+xf
+                                    dname = name, dset = set_X) + x + "_X."+xf
                     fnmsk = dir_tls(plot_id = plot,
-                                    mdate = date, dset = set_y) + x + "_y."+yf
+                                    dname = name, dset = set_y) + x + "_y."+yf
                     # https://gdal.org/python/osgeo.gdal-module.html#TranslateOptions
                     os.environ["GDAL_PAM_ENABLED"] = "NO"# suppress .aux files
                     if xf == "tif":# clip and save as tif
@@ -667,7 +706,7 @@ for set_X, set_y, use_plots in zip(["X", "X_val", "X_tst"], \
             mask = None
             out_ds = None
     ### delete all-black tiles
-    y_tiles = list(pathlib.Path(dir_tls(mdate = date, dset = set_y)) \
+    y_tiles = list(pathlib.Path(dir_tls(dname = name, dset = set_y)) \
                    .glob("**/*." + yf))
     if no_data_class:
         all_black = []
