@@ -4,67 +4,117 @@
 Created on Mon Feb 17 17:56:34 2022
 
 @author: Manuel
-Set general functions and variables.
+Full implementation
+run in terminal: python3 ~/LeleNet/py3/LeleNet_trn.py "U-Net" 10 40
 """
 __author__ = "Manuel R. Popp"
 
 #### parse arguments-----------------------------------------------------------
-import argparse
-import urllib.request # in case it isn't loaded properly by arcgis
+# Import arguments
+import argparse, pickle
 
 def parseArguments():
     parser = argparse.ArgumentParser()
+    # Positional mandatory arguments
+    parser.add_argument("model", help = "Model; one in U-Net, FCDenseNet).", \
+                        type = str)
+    parser.add_argument("bs", help = "Batchsize.",\
+                        type = int)
+    parser.add_argument("ep", help = "Training epochs.",\
+                        type = int)
     # Optional arguments
-    parser.add_argument("-date", "--date",\
-                        help = ("Sampling date of the data" +\
-                                "as MM_YYYY. Default: '03_2021'"),\
-                            type = str, default = "03_2021")
-    parser.add_argument("-name", "--name",\
-                        help = ("Alternative name for the dataset folder." +\
-                                " Defaults to -date."),\
+    parser.add_argument("-lr", "--lr",\
+                        help = "Initial learning rate.",\
+                            type = float, default = 1e-4)
+    parser.add_argument("-lrd", "--lrd",\
+                        help = "Learning rate decay factor.",\
+                            type = float, default = 0.95)
+    parser.add_argument("-lrs", "--lrs",\
+                        help = "Learning rate decay step size.",\
+                            type = int, default = 2)
+    parser.add_argument("-cbm", "--cbm",\
+                        help = "Callback metric (used to monitor proress)." + \
+                            " Options: None (use metric set in -mx), " + \
+                                "'val_loss', or 'val_accuracy'.",\
                             type = str, default = None)
+    parser.add_argument("-esp", "--esp",\
+                        help = "Early stopping patience.",\
+                            type = int, default = None)
+    parser.add_argument("-op", "--op",\
+                        help = "Optimizer. 'Adam', 'rms', or 'sgd'.",\
+                            type = str, default = "rms")
+    parser.add_argument("-ki", "--ki",\
+                        help = "Kernel initialiser.",\
+                            type = str, default = None)
+    parser.add_argument("-dr", "--dr",\
+                        help = "Dropout rate.",\
+                            type = float, default = 0.1)
     parser.add_argument("-xf", "--xf",\
-                        help = "RGB image format; either png, jpg, or tif.",\
+                        help = "Image format; either png, jpg, or tif.",\
                             type = str, default = "png")
     parser.add_argument("-yf", "--yf",\
-                        help = "Mask image format; either png, jpg, or tif.",\
+                        help = "Image format; either png, jpg, or tif.",\
                             type = str, default = "png")
     parser.add_argument("-imgr", "--imgr",\
                         help = "Image x resolution (rows).", type = int,\
-                            default = 256)
+                            default = None)
     parser.add_argument("-imgc", "--imgc",\
                         help = "Image y resolution (columns).", type = int,\
-                            default = 256)
-    parser.add_argument("-imgd", "--imgd",\
-                        help = "Image y resolution (square).", type = int,\
                             default = None)
-    parser.add_argument("-ndc", "--ndc",\
-                        help = "No data class.", type = bool,\
-                            default = False)
-    parser.add_argument("-abc", "--abc",\
-                        help = "Additional background class.", type = int,\
-                            default = -1)
-    parser.add_argument("-grp", "--grp",\
-                        help = "Group species by dictionary.", type = bool,\
-                            default = False)
-    parser.add_argument("-mbd", "--mbd",\
-                        help = "Mark bad data in additional mask image" +\
-                            "dimension.", type = bool, default = False)
+    parser.add_argument("-imgd", "--imgd",\
+                        help = "Image dimensions (rows = columns).",\
+                            type = int, default = None)
+    parser.add_argument("-imgdim", "--imgdim",\
+                        help = "X image dimensions (colours).", type = int,\
+                            default = 3)
+    parser.add_argument("-nc", "--nc",\
+                        help = "Number of classes.", type = int,\
+                            default = None)
+    parser.add_argument("-lc", "--lc",\
+                        help = "Lowest class value.", type = int,\
+                            default = 0)
+    parser.add_argument("-ww", "--ww",\
+                        help = ("Weights scaling factor. Inverse weights =" +\
+                            "1/(weights**ww) or 1/math.log(weights, ww)"), \
+                            type = float, default = 0.0)
+    parser.add_argument("-ws", "--ws",\
+                        help = ("Weight scaling (either 'exp' or 'log'."), \
+                            type = str, default = "exp")
+    parser.add_argument("-mx", "--mx",\
+                        help = ("Metric to track; either mIoU or f1."), \
+                            type = str, default = "mIoU")
     parser.add_argument("-wd", "--wd",\
                         help = "Alternative working directory.", type = str,\
                             default = "")
     parser.add_argument("-dd", "--dd",\
-                        help = "Alternative data directory.", type = str,\
+                        help = "Read data from alternative parent directory.",\
+                            type = str, default = None)
+    parser.add_argument("-od", "--od",\
+                        help = "Alternative output directory parent path.",\
+                            type = str, default = None)
+    parser.add_argument("-out", "--out",\
+                        help = "Alternative output folder name.", type = str,\
                             default = None)
-    parser.add_argument("-add", "--add",\
-                        help = "Add data for new plots without deleting ol" +\
-                        "d data.", type = bool,\
+    parser.add_argument("-yr", "--yr",\
+                        help = ("Sampling date of the data" +\
+                                "as MM_YYYY. Default: '03_2021'"),\
+                            type = str, default = "03_2021")
+    parser.add_argument("-r", "--r",\
+                        help = ("Resume from checkpoint. Either 'f' (False;" +\
+                                " default), 't' (True), or folder name."), \
+                            type = str, default = "f")
+    parser.add_argument("-save_settings", "--sv",\
+                        help = "Save training settings.", type = bool,\
                             default = True)
-    parser.add_argument("-mode", "--mode",\
-                        help = "Mode: Create tiles from originals or from " +\
-                            "orthomosaic. Select either 'raw' or 'ortho' " +\
-                                "(default).",\
-                            type = str, default = "ortho")
+    parser.add_argument("-debug", "--debug",\
+                        help = "Write successful steps to txt.", type = bool,\
+                            default = False)
+    parser.add_argument("-tb", "--tb",\
+                        help = "Export graphs to TensorBoard dev.", \
+                            type = bool, default = True)
+    parser.add_argument("-tbn", "--tbn",\
+                        help = "Alternative TensorBoard experiment name.", \
+                            type = str, default = None)
     # Parse arguments
     args = parser.parse_args()
     return args
@@ -72,62 +122,104 @@ if __name__ == "__main__":
     # Parse the arguments
     args = parseArguments()
 
-date = args.date
-name = args.name if args.name is not None else date
+# debug mode
+if False:
+    saved_args = \
+    "C:\\Users\\Manuel\\Nextcloud\\Masterarbeit\\py3\\vrs\\train_settings.pkl"
+    with open(saved_args, "rb") as f:
+        args = pickle.load(f)
+    args.wd = "home"
+
+mdl = args.model
+bs = args.bs
+epochz = args.ep
+init_lr = args.lr
+decay_lr = args.lrd
+step_lr = args.lrs
+cb_metric = args.cbm
+monitor_mode = "min" if cb_metric == "val_loss" else "max"
+es_patience = args.esp if args.esp is not None else epochz
+optmer = args.op
+kernel_init = args.ki
+drop = args.dr
 xf = args.xf
 yf = args.yf
-xf, yx = xf.casefold(), yf.casefold()
-imgr = args.imgr
-imgc = args.imgc
-imgd = args.imgd
-no_data_class = args.ndc
-additional_background_class = args.abc
-abc = True if additional_background_class >= 0 else False
-group_species = args.grp
-mark_bad_data = args.mbd
+imgdim = args.imgdim
+lc = args.lc
+ww = args.ww
+ws = args.ws
+mk = args.mx
 wd = args.wd
 dd = args.dd
-just_add = args.add
-mode = args.mode
-mode = mode.casefold()
-extent_from_shapefile = False
+od = args.od
+year = args.yr
+alternative_out_folder = args.out
+resume_training = args.r
+tb = args.tb
+tbn = args.tbn
 
-if imgd is not None:
-    imgr = imgd
-    imgc = imgd
+# case insensitive arguments
+mdl, optmer, xf, yf, wd, mk = mdl.casefold(), optmer.casefold(),\
+    xf.casefold(), yf.casefold(), wd.casefold(), mk.casefold()
+if resume_training in ["T", "F"]:
+    resume_training = resume_training.casefold()
+
+print("Script executed with the following input parameters:", \
+    "Dataset:", year, \
+    "Model:", mdl, "Batch size:", str(bs), "Epochs:", str(epochz), \
+    "Initial learning rate:", str(init_lr), "Learning rate decay:", \
+    str(decay_lr),
+          "Weights:", str(ww), "Metric:", str(mk))
 
 #### basic settings------------------------------------------------------------
-import platform, sys, datetime
+import platform, sys, datetime, pathlib, os
 OS = platform.system()
 OS_version = platform.release()
 py_version = sys.version
 t_start = datetime.datetime.utcnow()
+
+import tensorflow as tf
+import tensorflow_addons as tfa
 print("Running on " + OS + " " + OS_version + ".\nPython version: " +
-      py_version +
+      py_version + "\nTensorflow version: " + tf.__version__ +
       "\nUTC time (start): " + str(t_start) +
       "\nLocal time (start): " + str(datetime.datetime.now()))
 
+# Model (one of "mod_UNet", "mod_FCD", "mod_DL3")
+if mdl in ["u-net", "u_net", "unet", "mod_unet", "mod_u-net"]:
+    mod = "mod_UNet"
+elif mdl in ["fcd", "fcdensenet", "fc-densenet", "fc-dense-net", "mod_FCD"]:
+    mod = "mod_FCD"
+elif mdl in ["deep", "deeplab", "deeplabv3+", "deeplabv3plus", "deeplabv3", \
+             "dl3", "dlv3", "dlv3+", "mod_DL3"]:
+    mod = "mod_DL3"
+else:
+    raise ValueError("Unexpected input for argument 'model': " + str(mdl))
+
 ### general directory functions------------------------------------------------
-import os
-import re
-import pickle
 import numpy as np
+import re
 if wd == "home":
     if OS == "Linux":
-        wd = "/home/manuel/Nextcloud/Masterarbeit"
+        if platform.release() == "4.18.0-193.60.2.el8_2.x86_64":
+            wd = "/home/kit/ifgg/mp3890/LeleNet"
+        else:
+            wd = "/home/manuel/Nextcloud/Masterarbeit"
     elif OS == "Windows":
-        wd = os.path.join("G:\\", "Masterarbeit")
+        wd = os.path.join("C:\\", "Users", "Manuel",\
+                          "Nextcloud", "Masterarbeit")
     else:
         raise Exception("OS not detected.")
 elif wd == "":
+    # assumes this script is placed within a direct subfolder of wd (wd/py3)
     pydir = os.path.dirname(os.path.realpath(__file__))
     wd = os.path.dirname(pydir)
 else:
     wd = args.wd
 
-print("wd: " + wd)
-
-dd = wd if dd == None else dd
+# assign alternative data and output parent directories if options were set
+dd = wd if dd is None or dd == "wd" else dd
+od = wd if od is None or od == "wd" else od
 
 def dir_fig(*args):
     fig_dir = os.path.join(wd, "fig")
@@ -155,8 +247,12 @@ def dir_xls(*args):
         xls_id = re.split("[,/+ ]", xls_id)
         return os.path.join(xls_dir, *xls_id)
 
+out_folder_name = alternative_out_folder if alternative_out_folder is not \
+    None else year + os.path.sep + mod
 def dir_out(*args):
-    out_dir = os.path.join(wd, "out")
+    out_dir = os.path.join(od, "out", out_folder_name)
+    if not os.path.isdir(out_dir):
+        os.makedirs(out_dir)
     if len(args) == 0:
         return out_dir
     else:
@@ -182,544 +278,1146 @@ def get_var(name):
     
 os.chdir(wd)
 
+with open(dir_out("System_info.txt"), "w") as f:
+    f.write("Most recent run on " + OS + " " + OS_version +
+            ".\nPython version: " +
+            py_version + "\nTensorflow version: " + tf.__version__ +
+            "\nUTC time (start): " + str(t_start) +
+            "\nLocal time (start): " + str(datetime.datetime.now()))
+
+if args.sv:
+    save_var(args, "train_settings")
+    print("Saved training settings.")
+
+# debug mode text output-------------------------------------------------------
+def debug_cp(line, debug = args.debug):
+    if debug:
+        with open(dir_out("Debug.txt"), "a") as cp:
+            cp.write(line)
+
 #### data preparation directory functions--------------------------------------
-import pathlib
-def dir_omk(plot_id = None, mdate = date, type_ext = ""):
+def dir_omk(plot_id = None, myear = None, type_ext = ""):
     # returns list!
     omk_dir = dir_dat("omk")
     if plot_id == None:
-        if mdate == None:
+        if myear == None:
             return omk_dir
         else:
-            return os.path.join(omk_dir, mdate)
+            return os.path.join(omk_dir, myear)
     else:
-        if mdate == None:
+        if myear == None:
             return list(pathlib.Path(omk_dir) \
                         .glob("**/*" + plot_id + type_ext + ".tif"))
         else:
-            return list(pathlib.Path(os.path.join(omk_dir, mdate)) \
+            return list(pathlib.Path(os.path.join(omk_dir, myear)) \
                         .glob("**/*" + plot_id + type_ext + ".tif"))
 
-def dir_tls(dname = None, dset = None, plot_id = None):
-    tls_dir = dir_dat("tls")
+def dir_tls(myear = None, dset = None, plot_id = None):
     if plot_id == None:
-        if dname == None:
+        if myear == None:
             if dset == None:
-                return tls_dir
+                return dir_dat("tls")
             else:
-                return tls_dir
-                raise Exception("Missing date. Returning tile directory.")
+                return dir_dat("tls")
+                raise Exception("Missing year. Returning tile directory.")
         else:
             if dset == None:
-                return os.path.join(dir_dat("tls"), dname)
+                return os.path.join(dir_dat("tls"), myear)
             else:
-                return os.path.join(dir_dat("tls"), dname, dset, "0")
+                return os.path.join(dir_dat("tls"), myear, dset, "0")
     else:
-        if dname == None:
-            return tls_dir
-            raise Exception("Missing date. Returning tile directory.")
+        if myear == None:
+            return dir_dat("tls")
+            raise Exception("Missing year. Returning tile directory.")
         else:
             if dset == None:
-                return os.path.join(tls_dir, dname)
-                raise Exception("Missing dset (X or y). " + \
+                return os.path.join(dir_dat("tls"), myear)
+                raise Exception("Missing dset (X or y)." +\
                                 "Returning tile directory.")
             else:
-                return os.path.join(tls_dir, dname, dset, "0", plot_id)
-print("Ortomosaic directory: " + dir_omk())
-print("Tile directory: " + dir_tls())
+                return os.path.join(dir_dat("tls"), myear, dset, "0", plot_id)
 
-def save_dataset_info(variables, date = date, info = "dset_info"):
-    tile_dir = dir_tls(dname = name)
+def save_dataset_info(variables, year = year, info = "dset_info"):
+    tile_dir = dir_tls(myear = year)
     os.makedirs(tile_dir, exist_ok = True)
     with open(tile_dir + os.path.sep + info + ".pkl", "wb") as f:
         pickle.dump(variables, f)
 
-def get_dataset_info(date = date, info = "dset_info"):
-    tile_dir = dir_tls(dname = name)
-    with open(tile_dir + os.path.sep + info + ".pkl", "rb") as f:
+def get_dataset_info(dataset = year, info = "dset_info"):
+    inf_dir = os.path.join(dir_tls(myear = dataset), info + ".pkl")
+    with open(inf_dir, "rb") as f:
         return pickle.load(f)
 
 def toINT(filename):
     imgINT = filename.astype("uint8")
     return imgINT
 
+if not os.path.exists(dir_out()):
+    os.makedirs(dir_out())
+
+# get tile dimensions if not specified-----------------------------------------
+from PIL import Image
+if (args.imgr is None or args.imgc is None) and args.imgd is None:
+    imgs = list(pathlib.Path(os.path.dirname(dir_tls(myear = year,\
+                                                     dset = "y")))\
+                .glob("**/*." + yf))
+    im = Image.open(imgs[0])
+    w, h = im.size
+    im.close()
+
+# image dimensions
+if args.imgr != args.imgc:
+    print("Warning: Arguments imgr and imgc do not match.")
+if args.imgr is not None:
+    imgr = args.imgr
+else:
+    imgr = h
+if args.imgc is not None:
+    imgc = args.imgc
+else:
+    imgc = w
+
+if args.imgd is not None:
+    print("Argument imgd set. imgd overwrites imgr and imgc.")
+    imgr = args.imgd
+    imgc = args.imgd
+
 # Data preparation-------------------------------------------------------------
-### read dictionary to group species to classes, if need be
+### Run file DataPreparation.py
+###  read dictionary to group species to classes, if need be
+'''
 import pandas as pd
 specdict = pd.read_excel(dir_xls("SpeciesList.xlsx"),
                          sheet_name = "Dictionary", header = 0)
-### read images used for training, validation, and test datasets
-if mode == "raw":
-    sheet = "Raw_images"
-elif mode == "ortho":
-    sheet = "Orthomosaics"
+'''
+# exec(open("A1_DataPreparation.py").read())
+
+## load information generated during data preparation--------------------------
+classes, classes_decoded, NoDataValue, no_data_class, abc = get_dataset_info()
+N_CLASSES = len(classes) if no_data_class or abc else len(classes) + 1
+
+if args.nc is not None:
+    N_CLASSES = args.nc
+
+# Setup for training-----------------------------------------------------------
+os.chdir(wd)
+
+# import modules---------------------------------------------------------------
+debug_cp(line = "Import AUTOTUNE...\n")
+from tensorflow import keras as ks
+AUTOTUNE = tf.data.experimental.AUTOTUNE
+tf.__version__
+ks.__version__
+
+## make GPU available----------------------------------------------------------
+phys_devs = tf.config.experimental.list_physical_devices("GPU")
+print("N GPUs available: ", len(phys_devs))
+#if len(phys_devs) >= 1 and False:
+#    tf.config.experimental.set_memory_growth(phys_devs[0], True)
+#else:
+#    #os.environ['CUDA_VISIBLE_DEVICES'] = "-1"
+#    my_devices = tf.config.experimental.list_physical_devices( \
+#                                                    device_type = "CPU")
+#    tf.config.experimental.set_visible_devices(devices = my_devices, \
+#                                                device_type = "CPU")
+#    print("No GPUs used.")
+
+## general options/info--------------------------------------------------------
+N_img = len(list(pathlib.Path(dir_tls(myear = year, dset = "X")) \
+                 .glob("**/*." + xf)))
+N_val = len(list(pathlib.Path(dir_tls(myear = year, dset = "X_val")) \
+                 .glob("**/*." + xf)))
+zeed = 42
+
+## build data loader-----------------------------------------------------------
+def parse_image(img_path: str) -> dict:
+    # read image
+    image = tf.io.read_file(img_path)
+    if xf == "png":
+        image = tf.image.decode_png(image, channels = 3)
+    elif xf == "jpg":
+        image = tf.image.decode_jpeg(image, channels = 3)
+    elif xf == "tif":
+        import tensorflow_io as tfio
+        image = tfio.experimental.image.decode_tiff(image)
+    else:
+        print("Invalid X data format. Allowed formats: png, jpg, tif")
+    # read mask
+    mask_path = tf.strings.regex_replace(img_path, "X", "y")
+    mask_path = tf.strings.regex_replace(mask_path, "X." + xf, "y." + yf)
+    mask_path = tf.strings.regex_replace(mask_path, "image", "mask")
+    mask = tf.io.read_file(mask_path)
+    if yf == "png":
+        mask = tf.image.decode_png(mask, channels = 1)
+    elif yf == "tif":
+        import tensorflow_io as tfio
+        mask = tfio.experimental.image.decode_tiff(mask)
+    else:
+        print("Invalid y data format. Allowed formats: png, tif")
+    mask = tf.where(mask == 255, np.dtype("uint8").type(NoDataValue), mask)
+    return {"image": image, "segmentation_mask": mask}
+
+train_dataset = tf.data.Dataset.list_files(
+    dir_tls(myear = year, dset = "X") + os.path.sep + "*." + xf, seed=zeed)
+train_dataset = train_dataset.map(parse_image)
+
+val_dataset = tf.data.Dataset.list_files(
+    dir_tls(myear = year, dset = "X_val") + os.path.sep + "*." + xf, seed=zeed)
+val_dataset = val_dataset.map(parse_image)
+
+## data transformations--------------------------------------------------------
+if lc == 0:
+    @tf.function
+    def normalise(input_image: tf.Tensor, input_mask: tf.Tensor) -> tuple:
+        input_image = tf.cast(input_image, tf.float32) / 255.0
+        #input_image = tf.cast(input_image, tf.float32)
+        tf.image.per_image_standardization(input_image)
+        input_mask = tf.round(input_mask)
+        input_mask = tf.cast(input_mask, tf.uint8)
+        return input_image, input_mask
 else:
-    print("Invalid option: '" + mode + "' for argument '-mode'.",
-            "Switching to default: 'ortho'.")
-    sheet = "Orthomosaics"
+    print("Adjusting classes (lowest value != 0). This slows down training.")
+    lwst_cls = tf.convert_to_tensor(lc, dtype = tf.uint8)
+    @tf.function
+    def normalise(input_image: tf.Tensor, input_mask: tf.Tensor) -> tuple:
+        input_image = tf.cast(input_image, tf.float32) / 255.0
+        #input_image = tf.cast(input_image, tf.float32)
+        tf.image.per_image_standardization(input_image)
+        input_mask = tf.round(input_mask)
+        input_mask = tf.cast(input_mask, tf.uint8)
+        input_mask = tf.subtract(input_mask, lwst_cls)
+        return input_image, input_mask
 
-datasets = pd.read_excel(dir_xls("Datasets.xlsx"),
-                         sheet_name = sheet, header = 0)
-
-trn_plots = datasets[datasets["Usage"] == "Train"]["Name"].tolist()
-val_plots = datasets[datasets["Usage"] == "Validation"]["Name"].tolist()
-tst_plots = datasets[datasets["Usage"] == "Test"]["Name"].tolist()
-all_plots = trn_plots + val_plots + tst_plots
-
-# Define functions-------------------------------------------------------------
-## AcrGIS Online log-in
-import arcgis
-from arcgis.gis import GIS
-gis = GIS(None, "manuel.popp_KIT", "#8809manil+!", verify_cert = False)
-#gis = GIS("pro")
-
-def dir_shp(plot_id = None, mdate = None):
-    if mdate == None:
-        if plot_id == None:
-            return(dir_dat("shp"))
-        else:
-            print("Option 'mdate' missing but required.")
-    else:
-        if plot_id == None:
-            return(os.path.join(dir_dat("shp"), mdate))
-        else:
-            os.makedirs(os.path.join(dir_dat("shp"), mdate, plot_id),
-                        exist_ok = True)
-            return(os.path.join(dir_dat("shp"), mdate, plot_id))
-
-def downloadShapefiles(plot_id, path, dateTime = None):
-    try:
-        ## Search items by username
-        cont = gis.content.search("owner:{0}".format("manuel.popp_KIT"),
-                                  max_items = 3*len(trn_plots) + 999)
-        for i in range(len(cont)):
-            shp = cont[i]
-            if plot_id in shp.title and shp.type == "Feature Service":
-                if len(list(pathlib.Path(path). \
-                             glob("**/*" + plot_id + ".shp"))) < 1:
-                    update = True
-                    print("Shapefile", plot_id, "not found.", \
-                          "Downloading Feature Service from ArcGIS Online...")
-                elif not datetime == None:
-                    item = gis.content.get(shp.id)
-                    data_modfd = max(
-                        [j.properties.editingInfo.lastEditDate \
-                        for j \
-                        in item.layers + item.tables]\
-                        )
-                    update = data_modfd/1000 > dateTime
-                    if update:
-                        print("Updating Feature layer", plot_id + "...")
-                    else:
-                        print("Feature layer", plot_id, \
-                              "already up-to-date.")
-                    #somehow, ArcGIS timestamp has to be divided by 1000
-                    #datetime.datetime.fromtimestamp(data_modfd/1000)
-                    #datetime.datetime.fromtimestamp(dateTime)
-                elif dateTime == "any":
-                    update = True
-                else:
-                    update = False
-                if update:
-                    shapefile = shp.export("layer {}".format(shp.type),
-                                           "Shapefile")
-                    shapefile.download(path)
-                    shapefile.delete()
-                    import zipfile as zf
-                    tmp = zf.ZipFile(
-                        list(pathlib.Path(path). \
-                             glob("**/*.zip"))[0],
-                            mode = "r")
-                    tmp.extractall(path = path)
-                    tmp.close()
-                    os.remove(list(pathlib.Path(path). \
-                                   glob("**/*.zip"))[0])
-    except Exception as e:
-        print(e)
-
-def get_classes(path, plots):
-    from osgeo import ogr
-    drv = ogr.GetDriverByName("ESRI Shapefile")
-    ## read existing classes
-    files = list(pathlib.Path(path).glob("**/*.shp"))
-    folder = list(os.path.basename(file.parent) for file in files)
-    plotfiles = list(np.where(np.isin(folder, plots)))
-    files = [val for val, use in zip(files, np.isin(folder, plots)) if use]
-    shapefiles = []
-    for file in files:
-        par = file.parents[0]
-        plot = str(par.name)
-        if str(plot + ".shp") in str(file):
-            shapefiles.append(file)
-    class_list = []
-    for path_shp in shapefiles:
-        dataSource = drv.Open(os.path.join(path_shp), 0)
-        layer = dataSource.GetLayer()
-        feature = layer.GetNextFeature()
-        while feature:
-            class_list.append(feature.GetField("SpeciesID"))
-            feature = layer.GetNextFeature()
-        feature = None
-        layer = None
-        dataSource = None
-    class_set = set(class_list)
-    classes = list(class_set)
-    return(classes)
-
-def encode_classes(path, classes, custom_dict = None):
-    from osgeo import ogr
-    drv = ogr.GetDriverByName("ESRI Shapefile")
-    ## create new field
-    dataSource = drv.Open(path, 1)
-    FDef = ogr.FieldDefn("Class", ogr.OFTInteger)
-    layer = dataSource.GetLayer()
-    exists = layer.GetLayerDefn().GetFieldIndex("Class") >= 0
-    if not exists:
-        layer.CreateField(FDef)
-    feature = layer.GetNextFeature()
-    while feature:
-        spec = feature.GetField("SpeciesID")
-        c = classes.index(spec) if custom_dict is None else\
-            custom_dict.loc[custom_dict.SpeciesID == spec, "Class"].item()
-        feature.SetField("Class", c)
-        layer.SetFeature(feature)
-        feature = layer.GetNextFeature()
-    dataSource.SyncToDisk()
-    feature = None
-    layer = None
-    dataSource = None
-    outdir = os.path.dirname(os.path.realpath(path))
-    output = os.path.join(outdir, "class_encoding.csv")
-    import csv
-    with open(output, "w", newline = "") as out:
-        wr = csv.writer(out)
-        wr.writerows(zip(["ClassID"], ["Encoded"]))
-        wr.writerows(zip(classes, range(len(classes))))
-
-## get data and create masks and tiles
-import numpy as np
-from osgeo import gdal, ogr, osr
-from osgeo.gdal_array import CopyDatasetInfo, BandReadAsArray
-def blacken(data, mask, NoDataVal, outFile = "/vsimem/Blackened.tif"):
-    dat = gdal.Open(data, gdal.GA_ReadOnly)
-    msk = gdal.Open(mask, gdal.GA_ReadOnly)
-    bm = msk.GetRasterBand(1)
-    am = BandReadAsArray(bm)
-    null = np.where(am == NoDataVal)
-    am = None
-    bm = None
-    msk = None
-    drv = gdal.GetDriverByName("GTiff")
-    new = drv.Create(outFile, dat.RasterXSize, dat.RasterYSize,
-                     dat.RasterCount, dat.GetRasterBand(1).DataType)
-    CopyDatasetInfo(dat, new)
-    for b in range(dat.RasterCount):
-        band = dat.GetRasterBand(b+1)
-        a = BandReadAsArray(band)
-        a[null] = 0
-        new.GetRasterBand(b+1).WriteArray(a)
-        #new.GetRasterBand(b).SetNoDataValue(NoDataVal)
-        a = None
-    new.FlushCache()
-    dat = None
-    return new
-
-def check_version(file, derived_from):
-    ### expects pathlib path list
-    if len(file) < 1:
-        return None
-    elif len(derived_from) < 1:
-        print("Please pass a valid path to the derived_from argument.")
-    else:
-        file_mod = file[0].stat().st_mtime
-        from_mod = derived_from[0].stat().st_mtime
-        return (file_mod > from_mod)
-
-# Update extents if required---------------------------------------------------
-if not extent_from_shapefile:
-    if not os.path.isfile(os.path.join(dir_shp("Extents", mdate = date),
-                                   "Extents.shp")):
-        last_modified = None
-    else:
-        last_modified = pathlib.Path(dir_shp("Extents", mdate = date),
-                                   "Extents.shp").stat().st_mtime
-    downloadShapefiles(plot_id = "Extents",
-                               path = dir_shp("Extents", mdate = date),
-                               dateTime = last_modified)
-    Ext = os.path.join(dir_shp("Extents", mdate = date), "Extents.shp")
-    ExtUTM = Ext[:len(Ext)-4] + "_UTM.shp"
-    ## transform extents shapefile to UTM Zone 35S
-    drv = ogr.GetDriverByName("ESRI Shapefile")
-    if os.path.exists(ExtUTM):
-        drv.DeleteDataSource(ExtUTM)
-    srcDS = gdal.OpenEx(Ext)
-    crs = osr.SpatialReference()
-    crs.ImportFromEPSG(32735)
-    ds = gdal.VectorTranslate(ExtUTM, srcDS, format = "ESRI Shapefile",
-                              dstSRS = crs, reproject = True)
-    ds = None
-    srcDS = None
-    ### write .prj file
-    with open(f"{os.path.splitext(ExtUTM)[0]}.prj", "w") as f:
-        f.write(re.sub(" +", " ",str(crs).replace("\n", "")))
-
-# Iterate through image lists--------------------------------------------------
-from PIL import Image#for comparison of image dimensions
-import math
-for set_X, set_y, use_plots in zip(["X", "X_val", "X_tst"], \
-                                   ["y", "y_val", "y_tst"], \
-                                   [trn_plots, val_plots, tst_plots]):
-    delete_old_tiles = True
-
-    # run for each image or plot
-    for plot in use_plots:
-        ### update shapefile if required
-        if len(list(pathlib.Path(dir_shp(plot, mdate = date)) \
-                    .glob("**/*" + plot + ".shp"))) < 1:
-            last_modified = None
-        else:
-            last_modified = list(pathlib.Path(dir_shp(plot, mdate = date)). \
-                                 glob("**/*" + plot + \
-                                      ".shp"))[0].stat().st_mtime
-        downloadShapefiles(plot_id = plot,
-                               path = dir_shp(plot, mdate = date),
-                               dateTime = last_modified)
-    ## get class IDs
-    if set_X == "X":
-        classes_decoded = get_classes(dir_shp(mdate = date), plots = all_plots)
-        # NoDataValue = Class "bare soil"
-        NoDataValue = len(classes_decoded) if not group_species else\
-            int(specdict["Class"].max() + 1)
-        classes = range(len(classes_decoded)) if not group_species else\
-            range(int(specdict["Class"].max() + 1))
-        if additional_background_class >= 0:
-            NoDataValue = additional_background_class
-            classes = range(len(classes_decoded)) if not group_species else\
-                range(int(specdict["Class"].max() + 1))
-        save_dataset_info(variables = [classes, classes_decoded, NoDataValue,\
-                              no_data_class, abc])
-    print("Using background value " + str(NoDataValue))
+@tf.function
+def load_image_train(datapoint: dict) -> tuple:
+    input_image = tf.image.resize(datapoint["image"], (imgr, imgc))
+    input_mask = tf.image.resize(datapoint["segmentation_mask"], \
+                                 (imgr, imgc), method = "nearest")
+    # random flip
+    if tf.random.uniform(()) > 0.5:
+        input_image = tf.image.flip_left_right(input_image)
+        input_mask = tf.image.flip_left_right(input_mask)
+    '''
+    if tf.random.uniform(()) > 0.5:
+        input_image = tf.image.flip_up_down(input_image)
+        input_mask = tf.image.flip_up_down(input_mask)
+    '''
+    ###########################################################################
+    ## experimental augmentation
+    '''
+    # random rotation OLD VERSION, IMPROVED VERSION SEE BELOW
+    angle = np.random.rand(1) * 2.0 * np.pi
+    input_image = tfa.image.rotate(input_image, \
+                                   angle, \
+                                       interpolation = "nearest", \
+                                           fill_mode = "reflect")
+    input_mask = tfa.image.rotate(input_mask, \
+                                  angle, \
+                                      interpolation = "nearest", \
+                                          fill_mode = "reflect")
+    # resize to (almost) fill original image
+    # random scaling (do not use): = ((tf.random.uniform(()) * 0.2) + 0.8)
+    # added 1, divided by 2 to reduce filled area while keeping resize at not
+    # too extreme zoom levels
+    scaling = (np.sqrt(1.0 + np.abs(np.sin(angle / 2))) + 1) / 2
+    input_image = tf.image.resize(input_image, \
+                                  (int(imgr * scaling), \
+                                   int(imgc * scaling)), \
+                                      method = "lanczos3")
+    input_mask = tf.image.resize(input_mask, \
+                                 (int(imgr * scaling), \
+                                  int(imgc * scaling)), \
+                                     method = "nearest")
+    # clip to original size (central crop as fraction of scaled image)
+    fraction = np.clip(1.0 / scaling, 1.0 / (imgr * scaling), 1.0)
+    input_image = tf.image.central_crop(input_image, \
+                                        central_fraction = fraction)
+    input_mask = tf.image.central_crop(input_mask, \
+                                       central_fraction = fraction)
+    # resize to original size (not as fraction but fix int value) to make sure
+    # images have the original resolution (prevent potential rounding errors)
+    input_image = tf.image.resize(input_image, (imgr, imgc), \
+                                  method = "lanczos3")
+    input_mask = tf.image.resize(input_mask, (imgr, imgc), \
+                                  method = "nearest")
+    '''
+    # calculate upscaling through rotation
+    angle = np.random.rand(1) * 2.0 * np.pi
+    remainder = angle % (0.5 * np.pi)
+    scaled_by_rotation = (np.sin(remainder) + np.cos(remainder)).item()
     
-    for plot in use_plots:
-        shp_path = list(pathlib.Path(dir_shp(plot, mdate = date)) \
-                        .glob("**/*" + plot + ".shp"))[0]
-        if group_species:
-            encode_classes(path = os.path.join(shp_path),
-                           classes = classes_decoded,
-                           custom_dict = specdict)
-        else:
-            encode_classes(path = os.path.join(shp_path),
-                           classes = classes_decoded)
-        ### tif and shp path
-        t = os.path.join(dir_omk(plot, mdate = date)[0])
-        plib = pathlib.Path(dir_shp(plot, mdate = date))
-        ### check if shapefile was transformed to UTM
-        if check_version(file = list(pathlib.Path(dir_shp(plot, \
-                                                          mdate = date)).\
-                                  glob("**/*_UTM.shp")),
-                      derived_from = list(
-                          pathlib.Path(dir_shp(plot, mdate = date)).\
-                                  glob("**/*" + plot + ".shp"))) in (None, \
-                                                                     False):
-            if os.path.exists(t):
-                ### open orthomosaic
-                tif = gdal.Open(t)
-                crs1 = tif.GetProjectionRef()#GetSpatialRef()#.GetProjection()
-                tif = None
-                ### reproject shapefile
-                s = os.path.join(list(plib.glob("**/*.shp"))[0])
-                sUTM = s[:len(s)-4] + "_UTM.shp"
-                drv = ogr.GetDriverByName("ESRI Shapefile")
-                if os.path.exists(sUTM):
-                    drv.DeleteDataSource(sUTM)
-                srcDS = gdal.OpenEx(s)
-                ds = gdal.VectorTranslate(sUTM, srcDS, format="ESRI Shapefile",
-                                          dstSRS = crs1, reproject = True)
-                ds = None
-                srcDS = None
-                ### write .prj file
-                with open(f"{os.path.splitext(sUTM)[0]}.prj", "w") as f:
-                    f.write(crs1)
-            else:
-                raise Exception("Raster is missing (for layout reference): "+t)
-        if check_version(file = dir_omk(plot, type_ext = "_MASK"),
-                         derived_from = list(pathlib.Path(dir_shp(plot,
-                                                                  mdate=date)).\
-                                  glob("**/*_UTM.shp"))) in (None, False):
-            ## create mask
-            sUTM = os.path.join(list(plib.glob("**/*_UTM.shp"))[0])
-            drv = ogr.GetDriverByName("ESRI Shapefile")
-            shp = drv.Open(sUTM)
-            layer = shp.GetLayer()
+    # pad image by rotation scaling factor through reflect padding
+    p_rows = int(((imgr * scaled_by_rotation) - imgr) / 2)
+    p_cols = int(((imgc * scaled_by_rotation) - imgc) / 2)
+    pad = tf.constant([[p_rows, p_rows], [p_cols, p_cols], [0,0]])
+    input_image = tf.pad(input_image, pad, "reflect")
+    input_mask = tf.pad(input_mask, pad, "reflect")
+    
+    # rotate image by angle
+    input_image = tfa.image.rotate(input_image, \
+                                   angle, \
+                                       interpolation = "nearest", \
+                                           fill_mode = "reflect")
+    input_mask = tfa.image.rotate(input_mask, \
+                                  angle, \
+                                      interpolation = "nearest", \
+                                          fill_mode = "reflect")
+    
+    # random scaling
+    max_scaling_factor = 0.1
+    random_scaling = (tf.random.uniform(()) * max_scaling_factor) + \
+        (1 - 0.5*max_scaling_factor)
+    
+    # clip to original size (central crop as fraction of scaled image)
+    fraction = (1 / scaled_by_rotation) * random_scaling
+    input_image = tf.image.central_crop(input_image, \
+                                        central_fraction = fraction)
+    input_mask = tf.image.central_crop(input_mask, \
+                                       central_fraction = fraction)
+    
+    # resize to original size
+    input_image = tf.image.resize(input_image, (imgr, imgc), \
+                                  method = "lanczos3")
+    input_mask = tf.image.resize(input_mask, (imgr, imgc), \
+                                  method = "nearest")
+    ###########################################################################
+    # normalise images
+    input_image, input_mask = normalise(input_image, input_mask)
+    # colour augmentation
+    input_image = tf.image.random_brightness(input_image, max_delta = 0.25)
+    input_image = tf.image.random_contrast(input_image, lower = 0.5, \
+                                           upper = 2.0)
+    input_image = tf.image.random_saturation(input_image, lower = 0.6, \
+                                           upper = 1.75)
+    input_image = tf.clip_by_value(input_image, clip_value_min = 0.0, \
+                                   clip_value_max = 1.0)
+    return input_image, input_mask
 
-            if extent_from_shapefile:
-                x_min, x_max, y_min, y_max = (sys.maxsize, 0, sys.maxsize, 0)
-                feature = layer.GetNextFeature()
-                while feature:
-                    geom = feature.GetGeometryRef()
-                    extent = geom.GetEnvelope()
-                    x_min = min(x_min, extent[0])
-                    x_max = max(x_max, extent[1])
-                    y_min = min(y_min, extent[2])
-                    y_max = max(y_max, extent[3])
-                    feature = layer.GetNextFeature()
-                feature = None
-                extent = (x_min, x_max, y_min, y_max)
-            else:
-                Ext = drv.Open(ExtUTM)
-                lr = Ext.GetLayer()
-                ft = lr.GetNextFeature()
-                while ft:
-                    if ft.GetField("Image") == plot:
-                        geom = ft.GetGeometryRef()
-                        extent = geom.GetEnvelope()
-                    ft = lr.GetNextFeature()
-                ft = None
-                lr = None
-                x_min, x_max, y_min, y_max = extent
-            t_crop = t[:len(t)-4] + "_CROP.tif"
-            tif = gdal.Open(t)
-            tif_crop = gdal.Warp(t_crop, tif,
-                                 outputBounds = (x_min, y_min, x_max, y_max))
-            tif_crop.SetProjection(tif.GetProjection())
-            tif = None
-            tif_crop = None
-            from osgeo import gdalconst
-            tif_crop = gdal.Open(t_crop, gdalconst.GA_ReadOnly)#r"/vsimem/clip.tif"
-            m = t[:len(t)-4] + "_MASK.tif"
-            x_res, y_res = tif_crop.RasterXSize, tif_crop.RasterYSize
-            geo_tf = tif_crop.GetGeoTransform()
-            pxw = geo_tf[1]
-            mask = gdal.GetDriverByName("GTiff") \
-                .Create(m, x_res, y_res, 1, gdal.GDT_Byte)
-            mask.SetGeoTransform((x_min, pxw, 0, y_min, 0, pxw))
-            mask.SetProjection(tif_crop.GetProjection())
-            CopyDatasetInfo(tif_crop, mask)
-            band = mask.GetRasterBand(1)
-            band.Fill(NoDataValue)
-            gdal.RasterizeLayer(mask, [1], layer, options=["ATTRIBUTE=Class"])
-            #band.SetNoDataValue(NoDataValue)
-            band.FlushCache()
-            if mark_bad_data:
-                band2 = mask.GetRasterBand(2)
-                band2.Fill(0)
-                gdal.RasterizeLayer(mask, [2], layer, \
-                                    options = ["ATTRIBUTE=Bad_data"])
-                band2 = None
-            band = None
-            mask = None
-            layer = None
-            shp = None
-        else:
-            t_crop = os.path.join(dir_omk(plot, mdate = date, \
-                                          type_ext = "_CROP")[0])
-            m = os.path.join(dir_omk(plot, mdate = date, \
-                                     type_ext = "_MASK")[0])
-        ### check if training tiles were generated previously and are up-to-date
-        path_to_tiles = list(pathlib.Path(dir_tls(dname = name, dset = set_y)) \
-            .glob("**/" + plot + "*_y." + yf))
-        if len(path_to_tiles) >= 1:
-            im = Image.open(path_to_tiles[0])
-            w, h = im.size
+@tf.function
+def load_image_test(datapoint: dict) -> tuple:
+    input_image = tf.image.resize(datapoint["image"], (imgr, imgc))
+    input_mask = tf.image.resize(datapoint["segmentation_mask"], (imgr, imgc))
+    input_image, input_mask = normalise(input_image, input_mask)
+    return input_image, input_mask
+
+## create datasets-------------------------------------------------------------
+debug_cp(line = "Create datasets...")
+buff_size = 1000
+dataset = {"train": train_dataset, "val": val_dataset}
+# train dataset
+dataset["train"] = dataset["train"]\
+    .map(load_image_train, num_parallel_calls = tf.data.experimental.AUTOTUNE)
+dataset["train"] = dataset["train"].shuffle(buffer_size = buff_size,
+                                            seed = zeed)
+dataset["train"] = dataset["train"].repeat()
+dataset["train"] = dataset["train"].batch(bs)
+dataset["train"] = dataset["train"].prefetch(buffer_size = AUTOTUNE)
+# validation dataset
+dataset["val"] = dataset["val"].map(load_image_test)
+dataset["val"] = dataset["val"].repeat()
+dataset["val"] = dataset["val"].batch(bs)
+dataset["val"] = dataset["val"].prefetch(buffer_size = AUTOTUNE)
+
+print(dataset["train"])
+print(dataset["val"])
+
+# define weighs for categorical crossentropy loss function---------------------
+if lc == 0:
+    def calculate_weights(directory, n_classes):
+        imgs = list(pathlib.Path(directory).glob("**/*." + yf))
+        weights = np.array([0] * n_classes)
+        gravity = 0
+        for img in imgs:
+            im = Image.open(img)
+            vals = np.array(im.getdata(), dtype = np.uint8)
+            unique, counts = np.unique(vals, return_counts = True)
+            classweights = np.array([0] * n_classes)
+            classweights[unique.astype(int)] = counts
+            weights = ((weights * gravity) + classweights) / (gravity + 1)
+            gravity += 1
             im.close()
+        return weights
+    
+    def estimate_weights(directory, n_classes, N = 1000):
+        import random
+        imgs = list(pathlib.Path(directory).glob("**/*." + yf))
+        weights = np.array([0] * n_classes)
+        gravity = 1
+        for i in range(N):
+            x = random.randint(0, (len(imgs) - 1))
+            im = Image.open(imgs[x])
+            vals = np.array(im.getdata(), dtype = np.uint8)
+            unique, counts = np.unique(vals, return_counts = True)
+            classweights = np.array([0] * n_classes)
+            classweights[unique.astype(int)] = counts
+            weights = ((weights * gravity) + classweights) / (gravity + 1)
+            gravity += 1
+            im.close()
+        return weights
+else:
+    def calculate_weights(directory, n_classes):
+        imgs = list(pathlib.Path(directory).glob("**/*." + yf))
+        weights = np.array([0] * n_classes)
+        gravity = 0
+        for img in imgs:
+            im = Image.open(img)
+            vals = np.array(im.getdata(), dtype = np.uint8)
+            unique, counts = np.unique(vals, return_counts = True)
+            classweights = np.array([0] * n_classes)
+            classweights[unique.astype(int) - lc] = counts
+            weights = ((weights * gravity) + classweights) / (gravity + 1)
+            gravity += 1
+            im.close()
+        return weights
+
+import glob, time
+debug_cp(line = "Calculate weights...")
+if ww != 0.0:
+    if os.path.isfile(os.path.join(dir_tls(myear = year), "weights.pkl")):
+        print("Loading class weights...")
+        WEIGHTS, weights_timestamp = get_dataset_info(info = "weights")
+        print("Checking class weights timestamp...")
+        latest_mod = max(glob.glob(dir_tls(myear = year, dset = "y") + \
+                                   os.path.sep + "*"), key = os.path.getctime)
+        img_mod_timestamp = os.path.getmtime(latest_mod)
+        img_mod_timestamp = datetime.datetime.fromtimestamp(img_mod_timestamp)
+        if weights_timestamp < img_mod_timestamp:
+            print("Weights outdated. Calculating new class weights...")
+            WEIGHTS = calculate_weights(
+                os.path.dirname(dir_tls(myear = year, dset = "y")), N_CLASSES)
+            weights_timestamp = datetime.datetime.now()
+            save_dataset_info(variables = [WEIGHTS, weights_timestamp],
+                     info = "weights")
+    else:
+        print("Calculating class weights...")
+        WEIGHTS = calculate_weights(os.path.dirname( \
+            dir_tls(myear = year, dset = "y")), N_CLASSES)
+        weights_timestamp = datetime.datetime.now()
+        save_dataset_info(variables = [WEIGHTS, weights_timestamp],
+                     info = "weights")
+    NORMWEIGHTS = WEIGHTS / max(WEIGHTS)
+    ### inverse frequency as weights
+    #inv_weights = tf.constant((1 / (WEIGHTS + 0.01)), dtype = tf.float32,
+    #                          shape = [1, 1, 1, N_CLASSES])
+    import math
+    inv_weights = (1 / ((NORMWEIGHTS + 0.01)**(ww))) if ws == "exp" else \
+        [1 / math.log(nw, ww) for nw in NORMWEIGHTS]
+    inv_weights = inv_weights / max(inv_weights)
+    print("Calculated the following weights:", inv_weights)
+
+    ## add weights-------------------------------------------------------------
+    def add_sample_weights(image, segmentation_mask, cw = inv_weights):
+        class_weights = tf.constant(cw, dtype = tf.float32)
+        class_weights = class_weights/tf.reduce_sum(class_weights)
+        sample_weights = tf.gather(class_weights,
+                                   indices = tf.cast(segmentation_mask, \
+                                                     tf.int32))
+        return image, segmentation_mask, sample_weights
+    print(dataset["train"].map(add_sample_weights).element_spec)
+
+# Get model--------------------------------------------------------------------
+debug_cp(line = "Get model...")
+if kernel_init is not None:
+    k_initializers = { \
+        "he_normal" : "he_normal", \
+        "he_uniform" : "he_uniform", \
+        "random_uniform" : ks.initializers.RandomUniform(minval = 0.0,\
+                                                         maxval = 1.0), \
+        "truncated_normal" : ks.initializers.TruncatedNormal(mean = 0.0, \
+                                                             stddev = 0.05) \
+            }
+    initializer = k_initializers[kernel_init.casefold()]
+    #-------------------------------------------------------------------------
+    # U-Net
+if mod == "mod_UNet":
+    if kernel_init is None:
+        # as suggested by Ronneberget et al. (2015):
+        # Gaussian distribution with sd of sqrt(2/N) where N = number incoming
+        # nodes of one neuron
+        initializer = ks.initializers.HeNormal() # or "he_normal"
+    else:
+        initializer = kernel_init
+    def UNet(n_classes, input_shape = (imgr, imgc, imgdim), dropout = drop, \
+             filters = 64, \
+         ops = {"activation" : "relu",
+                "padding" : "same",
+                "kernel_initializer" : initializer
+        }):
+        # input layer
+        inputz = ks.layers.Input(shape = input_shape)
+        
+        # encoder part
+        ## 1st convolution
+        c1 = ks.layers.Conv2D(filters, (3, 3), **ops)(inputz)
+        c1 = ks.layers.Conv2D(filters, (3, 3), **ops)(c1)
+        ## 1st max pooling
+        p1 = ks.layers.MaxPooling2D(pool_size = (2, 2))(c1)
+        
+        ## 2nd convolution
+        c2 = ks.layers.Conv2D(filters*2, (3, 3), **ops)(p1)
+        c2 = ks.layers.Conv2D(filters*2, (3, 3), **ops)(c2)
+        ## 2nd max pooling
+        p2 = ks.layers.MaxPooling2D(pool_size = (2, 2))(c2)
+        
+        ## 3rd convolution
+        c3 = ks.layers.Conv2D(filters*4, (3, 3), **ops)(p2)
+        c3 = ks.layers.Conv2D(filters*4, (3, 3), **ops)(c3)
+        ## 3rd max pooling
+        p3 = ks.layers.MaxPooling2D(pool_size = (2, 2))(c3)
+        
+        ## 4th convolution
+        c4 = ks.layers.Conv2D(filters*8, (3, 3), **ops)(p3)
+        c4 = ks.layers.Conv2D(filters*8, (3, 3), **ops)(c4)
+        ## Drop
+        d4 = ks.layers.Dropout(dropout)(c4)
+        ## 4th max pooling
+        p4 = ks.layers.MaxPooling2D(pool_size = (2, 2))(d4)
+        
+        ## 5th convolution
+        c5 = ks.layers.Conv2D(filters*16, (3, 3), **ops)(p4)
+        c5 = ks.layers.Conv2D(filters*16, (3, 3), **ops)(c5)
+        ## Drop
+        d5 = ks.layers.Dropout(dropout)(c5)
+        
+        # decoder part
+        ## 1st up convolution
+        us6 = ks.layers.UpSampling2D(size = (2, 2))(d5)
+        up6 = ks.layers.Conv2D(filters*8, (2, 2), **ops)(us6)
+        ## merge
+        ct6 = ks.layers.concatenate([d4, up6], axis = 3)
+        uc6 = ks.layers.Conv2D(filters*8, (3, 3), **ops)(ct6)
+        uc6 = ks.layers.Conv2D(filters*8, (3, 3), **ops)(uc6)
+        
+        ## 2nd up convolution
+        us7 = ks.layers.UpSampling2D(size = (2, 2))(uc6)
+        up7 = ks.layers.Conv2D(filters*4, (2, 2), **ops)(us7)
+        ## merge
+        ct7 = ks.layers.concatenate([c3, up7], axis = 3)
+        uc7 = ks.layers.Conv2D(filters*4, (3, 3), **ops)(ct7)
+        uc7 = ks.layers.Conv2D(filters*4, (2, 2), **ops)(uc7)
+         
+        ## 3rd up convolution
+        us8 = ks.layers.UpSampling2D(size = (2, 2))(uc7)
+        up8 = ks.layers.Conv2D(filters*2, (2, 2), **ops)(us8)
+        ## merge
+        ct8 = ks.layers.concatenate([c2, up8], axis = 3)
+        uc8 = ks.layers.Conv2D(filters*2, (3, 3), **ops)(ct8)
+        uc8 = ks.layers.Conv2D(filters*2, (3, 3), **ops)(uc8)
+         
+        ## 4th up convolution
+        us9 = ks.layers.UpSampling2D(size = (2, 2))(uc8)
+        up9 = ks.layers.Conv2D(filters, (2, 2), **ops)(us9)
+        ## merge
+        ct9 = ks.layers.concatenate([c1, up9], axis = 3)
+        uc9 = ks.layers.Conv2D(filters, (3, 3), **ops)(ct9)
+        uc9 = ks.layers.Conv2D(filters, (3, 3), **ops)(uc9)
+        uc9 = ks.layers.Conv2D(2, (3, 3), **ops)(uc9)
+        
+        # output layer
+        if n_classes > 2:
+            outputz = ks.layers.Conv2D(n_classes, (1, 1), \
+                                       activation = "softmax")(uc9)
         else:
-            w = 0
-        keep_tiles = True if (just_add and w == imgc) else False
-        if check_version(file = list(pathlib.Path(dir_tls(dname = name,
-                                                       dset = set_y)) \
-                                  .glob("**/" + plot + "*_y." + yf)),
-                      derived_from = list(pathlib.Path(dir_omk(mdate = date)).\
-                                          glob("**/*" + plot + "_MASK.tif"))
-                      ) in (None, False) and not keep_tiles:
-            print("Creating tiles", set_X, set_y, "for", plot)
-            ## create tiles
-            ### blacken pixels not assigned to any class
-            if no_data_class:
-                tif = blacken(data = t_crop, mask = m, NoDataVal = NoDataValue)
-            else:
-                tif = gdal.Open(t_crop)
-            mask = gdal.Open(m)
-            r = mask.RasterYSize
-            c = mask.RasterXSize
-            geo_tf = mask.GetGeoTransform()
-            Xmin = geo_tf[0]
-            Ymax = geo_tf[3]
-            res = geo_tf[1]
-            ytiles = math.floor(r/imgr)
-            xtiles = math.floor(c/imgc)
-            ypx = ytiles*int(imgr)
-            xpx = xtiles*int(imgc)
-            ### offset the raster so the unused area is equally distributed at all
-            ### sides of the rectangle
-            yoffset = math.floor(0.5*(r - ypx))
-            xoffset = math.floor(0.5*(c - xpx))
-            ymax = Ymax - yoffset * res
-            xmin = Xmin + xoffset * res
-            ycrds = [ymax - res*imgr*m for m in range(ytiles + 1)]
-            xcrds = [xmin + res*imgc*n for n in range(xtiles + 1)]
-            os.makedirs(dir_tls(dname = name, dset = set_X), exist_ok = True)
-            os.makedirs(dir_tls(dname = name, dset = set_y), exist_ok = True)
-            ### delete old files
-            if delete_old_tiles:
-                old_tiles = []
-                for root, dirs, files in os.walk(dir_tls(dname = name,\
-                                                         dset = set_X)):
-                    for file in files:
-                        if file.endswith(plot + "*." + xf):
-                            old_tiles.append(os.path.join(root, file))
-                for root, dirs, files in os.walk(dir_tls(dname = name,\
-                                                         dset = set_y)):
-                    for file in files:
-                        if file.endswith(plot + "*." + yf):
-                            old_tiles.append(os.path.join(root, file))
-                for file in old_tiles:
-                     os.remove(os.path.join(file))
-            delete_old_tiles = False
-            counter = 0
-            for i in range(ytiles):
-                for j in range(xtiles):
-                    ymin = ycrds[i+1]
-                    ymax = ycrds[i]
-                    xmin = xcrds[j]
-                    xmax = xcrds[j+1]
-                    x = str(counter).zfill(8)
-                    fntif = dir_tls(plot_id = plot,
-                                    dname = name, dset = set_X) + x + "_X."+xf
-                    fnmsk = dir_tls(plot_id = plot,
-                                    dname = name, dset = set_y) + x + "_y."+yf
-                    # https://gdal.org/python/osgeo.gdal-module.html#TranslateOptions
-                    os.environ["GDAL_PAM_ENABLED"] = "NO"# suppress .aux files
-                    if xf == "tif":# clip and save as tif
-                        gdal.Warp(fntif, tif,
-                                  outputBounds = (xmin, ymin, xmax, ymax))
-                    elif xf == "png":# clip and save as png
-                        out_ds = gdal.Translate(fntif, tif,
-                                       projWin = [xmin, ymax, xmax, ymin])
-                    if yf == "tif":# clip and save as tif
-                        out_ds = gdal.Warp(fnmsk, mask,
-                                  outputBounds = (xmin, ymin, xmax, ymax))
-                    elif yf == "png":# clip and save as png
-                        out_ds = gdal.Translate(fnmsk, mask,
-                                       projWin = [xmin, ymax, xmax, ymin])
-                    counter = counter + 1
-            tif = None
-            mask = None
-            out_ds = None
-    ### delete all-black tiles
-    y_tiles = list(pathlib.Path(dir_tls(dname = name, dset = set_y)) \
-                   .glob("**/*." + yf))
-    if no_data_class:
-        all_black = []
-        for i in y_tiles:
-            tile = gdal.Open(os.path.join(i))
-            band = tile.GetRasterBand(1)
-            vals = np.unique(band.ReadAsArray())
-            band = None
-            tile = None
-            if min(vals) == NoDataValue and max(vals) == NoDataValue:
-                all_black.append(i)
-        for i in all_black:
-            corr_X = os.path.join(i.parents[2], "X", "0",
-                                  str(i.name).replace("y", "X"))
-            os.remove(corr_X)
-            os.remove(os.path.join(i))
+            outputz = ks.layers.Conv2D(1, (1, 1), activation = "sigmoid")(uc9)
+    
+        model = ks.Model(inputs = inputz, outputs = outputz)
+        print(model.summary())
+        print(f'Total number of ks.layers: {len(model.layers)}')
+        return model
+
+    # get model
+    model = UNet(n_classes = N_CLASSES)
+
+    #-------------------------------------------------------------------------
+    # FCDenseNet
+elif mod == "mod_FCD":
+    if kernel_init is None:
+        # following Jegou et al (2017)
+        initializer = ks.initializers.HeUniform() # or "he_uniform"
+    else:
+        initializer = kernel_init
+    def BN_ReLU_Conv(inputs, n_filters, filter_size = 3, dropout_p = drop):
+        l = ks.layers.BatchNormalization()(inputs)
+        l = ks.layers.Activation("relu")(l)
+        l = ks.layers.Conv2D(n_filters, filter_size, activation = None,
+                             padding = "same", 
+                             kernel_initializer = initializer) (l)
+        if dropout_p != 0.0:
+            l = ks.layers.Dropout(dropout_p)(l)
+        return l
+    
+    def TransitionDown(inputs, n_filters, dropout_p = drop):
+        l = BN_ReLU_Conv(inputs, n_filters, filter_size = 1,\
+                         dropout_p = dropout_p)
+        l = ks.layers.MaxPool2D(pool_size = (2, 2))(l)
+        return l
+    
+    def TransitionUp(skip_connection, block_to_upsample, n_filters_keep):
+        l = ks.layers.concatenate(block_to_upsample)
+        l = ks.layers.Conv2DTranspose(n_filters_keep, kernel_size = (3, 3),
+                                      strides = (2, 2), padding = "same", 
+                                      kernel_initializer = initializer)(l)
+        l = ks.layers.concatenate([l, skip_connection])
+        return l
+    
+    def FCDense(n_classes, input_shape = (imgr, imgc, imgdim),
+                n_filters_first_conv = 48, n_pool = 4, growth_rate = 12,
+                n_layers_per_block = 5, dropout_p = drop):
+        """
+        Original note from the authors of the FC-DenseNet:
+        The network consist of a downsampling path, where dense blocks and
+        transition down are applied, followed
+        by an upsampling path where transition up and dense blocks are applied.
+        Skip connections are used between the downsampling path and the
+        upsampling path
+        Each layer is a composite function of BN - ReLU - Conv and the last
+        layer is a softmax layer.
+        :param input_shape: shape of the input batch. Only the first dimension
+            (n_channels) is needed
+        :param n_classes: number of classes
+        :param n_filters_first_conv: number of filters for the first
+            convolution applied
+        :param n_pool: number of pooling ks.layers=number of transition down=
+            number of transition up
+        :param growth_rate: number of new feature maps created by each layer
+            in a dense block
+        :param n_layers_per_block: number of ks.layers per block. Can be an int
+            or a list of size 2 * n_pool + 1
+        :param dropout_p: dropout rate applied after each convolution
+            (0. for not using)
+        """
+        # check n_layers_per_block setting
+        if type(n_layers_per_block) == list:
+            assert(len(n_layers_per_block) == 2*n_pool + 1)
+        elif type(n_layers_per_block) == int:
+            n_layers_per_block = [n_layers_per_block]*(2*n_pool + 1)
+        else:
+            raise ValueError
+        # Input layer, m = 3
+        inputz = tf.keras.layers.Input(shape = input_shape)
+        
+        # first convolution; store feature maps in the Tiramisu
+        # 3 x 3 convolution, m = 48
+        Tiramisu = ks.layers.Conv2D(filters = n_filters_first_conv,
+                                    kernel_size = (3, 3), strides = (1, 1),
+                                    padding = "same", dilation_rate = (1, 1),
+                                    activation = "relu",
+                                    kernel_initializer = initializer
+                                    )(inputz)
+        n_filters = n_filters_first_conv
+        
+        # downsampling path, n*(dense block + transition down)
+        skip_connection_list = []
+        
+        for i in range(n_pool):
+            ## dense block
+            for j in range(n_layers_per_block[i]):
+                ### Compute new feature maps
+                l = BN_ReLU_Conv(Tiramisu, growth_rate, dropout_p = dropout_p)
+                ### and stack it---the Tiramisu is growing
+                Tiramisu = ks.layers.concatenate([Tiramisu, l])
+                n_filters += growth_rate
+            ## store Tiramisu in skip_connections list
+            skip_connection_list.append(Tiramisu)
+            ## transition Down
+            Tiramisu = TransitionDown(Tiramisu, n_filters, dropout_p)
+        skip_connection_list = skip_connection_list[::-1]
+        
+        # bottleneck
+        ## store output of subsequent dense block;
+        ## upsample only these new features
+        block_to_upsample = []
+        # dense Block
+        for j in range(n_layers_per_block[n_pool]):
+            l = BN_ReLU_Conv(Tiramisu, growth_rate, dropout_p = dropout_p)
+            block_to_upsample.append(l)
+            Tiramisu = ks.layers.concatenate([Tiramisu, l])
+        
+        # upsampling path
+        for i in range(n_pool):
+            ## Transition Up ( Upsampling + concatenation with the skip
+            ## connection)
+            n_filters_keep = growth_rate * n_layers_per_block[n_pool + i]
+            Tiramisu = TransitionUp(skip_connection_list[i], block_to_upsample,
+                                 n_filters_keep)
+            ## dense Block
+            block_to_upsample = []
+            for j in range(n_layers_per_block[n_pool + i + 1]):
+                l = BN_ReLU_Conv(Tiramisu, growth_rate, dropout_p = dropout_p)
+                block_to_upsample.append(l)
+                Tiramisu = ks.layers.concatenate([Tiramisu, l])
+        
+        # output layer; 1x1 convolution, m = number of classes
+        if n_classes > 2:
+            outputz = ks.layers.Conv2D(n_classes, (1, 1), \
+                                   activation = "softmax")(Tiramisu)
+        else:
+            outputz = ks.layers.Conv2D(1, (1, 1), \
+                                   activation = "sigmoid")(Tiramisu)
+        model = tf.keras.Model(inputs = inputz, outputs = outputz)
+        print(model.summary())
+        print(f'Total number of ks.layers: {len(model.layers)}')
+        return model
+    
+    # get model
+    model = FCDense(n_classes = N_CLASSES)
+    
+    #-------------------------------------------------------------------------
+    # DeepLab V3
+elif mod == "mod_DL3":
+    # https://keras.io/examples/vision/deeplabv3_plus/
+    if kernel_init is None:
+        initializer = ks.initializers.HeNormal() # or "he_normal"
+    else:
+        initializer = kernel_init
+    def convolution_block(
+        block_input,
+        num_filters = 256,
+        kernel_size = 3,
+        dilation_rate = 1,
+        padding = "same",
+        use_bias = False,
+    ):
+        x = ks.layers.Conv2D(
+            num_filters,
+            kernel_size = kernel_size,
+            dilation_rate = dilation_rate,
+            padding = "same",
+            use_bias = use_bias,
+            kernel_initializer = initializer,
+        )(block_input)
+        x = ks.layers.BatchNormalization()(x)
+        return tf.nn.relu(x)
+    
+    def DilatedSpatialPyramidPooling(dspp_input):
+        dims = dspp_input.shape
+        x = ks.layers.AveragePooling2D(pool_size = (dims[-3], dims[-2]) \
+                                    )(dspp_input)
+        x = convolution_block(x, kernel_size = 1, use_bias = True)
+        out_pool = ks.layers.UpSampling2D(
+            size = (dims[-3] // x.shape[1], dims[-2] // x.shape[2]), \
+                interpolation = "bilinear",
+        )(x)
+    
+        out_1 = convolution_block(dspp_input, kernel_size = 1, \
+                                  dilation_rate = 1)
+        out_6 = convolution_block(dspp_input, kernel_size = 3, \
+                                  dilation_rate = 6)
+        out_12 = convolution_block(dspp_input, kernel_size = 3, \
+                                   dilation_rate = 12)
+        out_18 = convolution_block(dspp_input, kernel_size = 3, \
+                                   dilation_rate = 18)
+    
+        x = ks.layers.Concatenate(axis = -1)([out_pool, \
+                                           out_1, out_6, out_12, out_18])
+        output = convolution_block(x, kernel_size = 1)
+        return output
+
+    def DeeplabV3Plus(image_size, n_classes):
+        inputz = ks.Input(shape = (image_size, image_size, 3))
+        resnet50 = ks.applications.ResNet50(
+            weights = "imagenet", include_top = False, \
+                input_tensor = inputz
+        )
+        x = resnet50.get_layer("conv4_block6_2_relu").output
+        x = DilatedSpatialPyramidPooling(x)
+    
+        input_a = ks.layers.UpSampling2D(
+            size = \
+                (image_size // 4 // x.shape[1], image_size // 4 // x.shape[2]),
+            interpolation = "bilinear",
+        )(x)
+        input_b = resnet50.get_layer("conv2_block3_2_relu").output
+        input_b = convolution_block(input_b, num_filters = 48, kernel_size = 1)
+    
+        x = ks.layers.Concatenate(axis=-1)([input_a, input_b])
+        x = convolution_block(x)
+        x = convolution_block(x)
+        x = ks.layers.UpSampling2D(
+            size = (image_size // x.shape[1], image_size // x.shape[2]),
+            interpolation = "bilinear",
+        )(x)
+        outputz = ks.layers.Conv2D(n_classes, kernel_size = (1, 1), \
+                                     padding = "same")(x)
+        return ks.Model(inputs = inputz, outputs = outputz)
+    
+    # get model
+    model = DeeplabV3Plus(image_size = imgr, n_classes = N_CLASSES)
+
+### logs and callbacks---------------------------------------------------------
+# define callbacks
+from tensorflow.keras.callbacks import LearningRateScheduler
+'''
+Simple custom LR decay which would only require the epoch index as an argument:
+'''
+def step_decay_schedule(initial_lr = init_lr,
+                        decay_factor = decay_lr, step_size = step_lr):
+    def schedule(epoch):
+        return initial_lr * (decay_factor ** np.floor(epoch/step_size))
+    
+    return LearningRateScheduler(schedule)
+#lr_sched = step_decay_schedule(initial_lr = init_lr,
+#                               decay_factor = decay_lr, step_size = step_lr)
+'''
+Using some simple built-in learning rate decay:
+'''
+if init_lr is not None:
+    lr_sched = ks.optimizers.schedules.ExponentialDecay(
+    initial_learning_rate = init_lr,
+    # decay after n steps
+    decay_steps = np.floor(N_img/bs),
+    decay_rate = decay_lr)
+    optimizers = {
+        "adam" : ks.optimizers.Adam(learning_rate = lr_sched, \
+                                    clipnorm = 1), \
+        "sgd" : ks.optimizers.SGD(learning_rate = lr_sched, \
+                                  clipnorm = 1), \
+        "rms" : ks.optimizers.RMSprop(learning_rate = lr_sched, \
+                                      clipnorm = 1)
+        }
+else:
+    optimizers = {
+        "adam" : ks.optimizers.Adam(),
+        "sgd" : ks.optimizers.SGD(),
+        "rms" : ks.optimizers.RMSprop()
+        }
+try:
+    optimizer = optimizers[optmer]
+except:
+    print("Failed to assign optimizer: " + optmer + \
+          ". Use 'Adam', 'rms', or 'sgd'.")
+
+# create output directory------------------------------------------------------
+os.makedirs(dir_out(), exist_ok = True)
+
+# create log directory---------------------------------------------------------
+now = datetime.datetime.now()
+logdir = os.path.join(dir_out("logs"), now.strftime("%y-%m-%d-%H-%M-%S"))
+cptdir = os.path.join(dir_out("cpts"), now.strftime("%y-%m-%d-%H-%M-%S"))
+os.makedirs(logdir, exist_ok = True)
+os.makedirs(cptdir, exist_ok = True)
+
+# compile model----------------------------------------------------------------
+## loss functions
+### define IoU loss (only binary)
+#### https://www.youtube.com/watch?v=NqDBvUPD9jg&ab_channel=DigitalSreeni
+#def IoU_coe(y_true, y_pred):
+#    T = ks.flatten(y_true)
+#    P = ks.flatten(y_pred)
+#    intersect = ks.sum(T * P)
+#    IoU = (intersect + 1.0) / (ks.sum(T) + ks.sum(P) - intersect + 1.0)
+#    return IoU
+
+#def IoU_loss(y_true, y_pred):
+#    return 1 - IoU_coe(y_true, y_pred)
+
+### define dice coefficient
+# https://github.com/tensorlayer/tensorlayer/blob/master/tensorlayer/cost.py#L216
+def dice_coe(target, output, loss_type = "jaccard",
+             axis = (1, 2, 3), smooth = 1):# orig. val. smooth = 1e-5
+    inse = tf.reduce_sum(output * target, axis = axis)
+    if loss_type == "jaccard":
+        l = tf.reduce_sum(output * output, axis = axis)
+        r = tf.reduce_sum(target * target, axis = axis)
+    elif loss_type == "sorensen":
+        l = tf.reduce_sum(output, axis = axis)
+        r = tf.reduce_sum(target, axis = axis)
+    else:
+        raise Exception("Unknow loss_type: " + loss_type)
+    dice = (2. * inse + smooth) / (l + r + smooth)
+    dice = tf.reduce_mean(dice)
+    return dice
+def dice_loss(y_true, y_pred):
+    return 1 - dice_coe(y_true, y_pred)
+
+### define focal loss
+# pip3 install focal-loss
+
+## alternative approach to weighted scce
+# https://github.com/tensorflow/models/blob/master/official/nlp/modeling/losses/weighted_sparse_categorical_crossentropy.py
+
+## metrics
+### get intersect. over union (original function gives error -> updated accor-
+### ding to https://stackoverflow.com/a/61826074/11611246)
+# mIoU = ks.metrics.MeanIoU(n_classes = N_CLASSES)
+class MulticlassMeanIoU(tf.keras.metrics.MeanIoU):
+    def __init__(self,
+                 y_true = None,
+                 y_pred = None,
+                 num_classes = None,
+                 name = "Multi_MeanIoU",
+                 dtype = None):
+        super(MulticlassMeanIoU, self).__init__(num_classes = num_classes,
+                                             name = name, dtype = dtype)
+        self.__name__ = name
+
+    def update_state(self, y_true, y_pred, sample_weight = None):
+        y_pred = tf.math.argmax(y_pred, axis = -1)
+        return super().update_state(y_true, y_pred, sample_weight)
+
+if mk == "f1":
+    met = tfa.metrics.F1Score(num_classes = N_CLASSES, threshold = 0.5)
+    met.__name__ = "f1"
+    print("Using metric f1-score")
+else:
+    mIoU = MulticlassMeanIoU(num_classes = N_CLASSES)
+    met = MulticlassMeanIoU(num_classes = N_CLASSES)
+    print("Using metric mIoU")
+
+metrix = [met, "sparse_categorical_accuracy"] if N_CLASSES > 2 else \
+    [met, "accuracy"]
+
+### get sparse categorical/binary cross entropy
+lozz = ks.losses.SparseCategoricalCrossentropy() if N_CLASSES > 2 else\
+    ks.losses.BinaryCrossentropy()
+
+#run_opts = tf.compat.v1.RunOptions(report_tensor_allocations_upon_oom = True)
+
+# callbacks--------------------------------------------------------------------
+monitor_metric = cb_metric if cb_metric is not None else "val_" + met.__name__
+cllbs = [
+    #ks.callbacks.ReduceLROnPlateau(monitor = "val_loss", factor = 0.2,
+    #                               patience = 5, min_lr = 0.001),
+    ks.callbacks.ModelCheckpoint(os.path.join(cptdir, \
+                                              "Epoch.{epoch:02d}.hdf5"), \
+                                 monitor = monitor_metric, \
+                                 mode = monitor_mode, \
+                                 save_best_only = True, \
+                                 save_freq = 1),
+    ks.callbacks.TensorBoard(log_dir = logdir, histogram_freq = 5)
+    ]
+if es_patience is not None:
+    cllbs.append(ks.callbacks.EarlyStopping(monitor = monitor_metric, \
+                                            mode = monitor_mode, \
+                               patience = es_patience, verbose = 1))
+
+# resume training or compile new model-----------------------------------------
+if resume_training == "f":
+    os.makedirs(logdir, exist_ok = True)
+    os.makedirs(cptdir, exist_ok = True)
+    os.chdir(logdir)
+    model.compile(optimizer = optimizer, loss = lozz,
+                  metrics = metrix)#, options = run_opts)
+    model.summary()
+elif resume_training == "t":
+    cpt_folders = [f for f in os.listdir(dir_out("cpts")) \
+                   if not f.startswith(".")]
+    cpt_dates = [datetime.datetime.strptime(d, "%y-%m-%d-%H-%M-%S"\
+                                            ) for d in cpt_folders]
+    cpt_folder = max(cpt_dates).strftime("%y-%m-%d-%H-%M-%S")
+    debug_cp(line = "Resume training from " + cpt_folder)
+else:
+    cpt_folder = resume_training
+
+if resume_training != "f":
+    if resume_training == "t":
+        list_of_files = glob.glob(dir_out("cpts", cpt_folder) + os.path.sep + \
+                                  "*" + ".hdf5")
+        trained_model = glob.glob(dir_out("cpts", "trained_mod", \
+                                          "saved_model.pb"))
+        model_folder = [os.path.dirname(trained_model[0])] if \
+                        len(trained_model) >= 1 else []
+        list_of_files += model_folder
+    elif os.path.isfile(cpt_folder):
+        list_of_files = [os.path.dirname(cpt_folder)] if ".pb" in cpt_folder \
+            else [cpt_folder]
+    else:
+        list_of_files = glob.glob(cpt_folder + os.path.sep + \
+                                  "*" + ".hdf5")
+        trained_model = glob.glob(os.path.join(cpt_folder, "saved_model.pb"))
+        model_folder = [os.path.dirname(trained_model[0])] if \
+                        len(trained_model) >= 1 else []
+        list_of_files += model_folder
+
+    checkpoint = max(list_of_files, key = os.path.getctime)
+    #try:
+    model = ks.models.load_model(checkpoint, \
+                                 custom_objects = \
+                                     {"MulticlassMeanIoU": mIoU})
+    #except:
+    #    print("Failed to load model from", checkpoint)
+    all_logs = [dir_out("logs", p) for p in os.listdir(dir_out("logs"))]
+    logdir =  max(all_logs, key = os.path.getctime)
+    os.chdir(logdir)
+    '''
+    model.compile(optimizer = optimizer, loss = lozz,
+                  metrics = metrix)
+    '''
+
+# report to tensorboard--------------------------------------------------------
+if tb:
+    debug_cp(line = "Start Tensorboard dev. Directory: " + logdir + "\n")
+    import subprocess
+    PARAMETERS = "Batch size: " + str(bs) + " Init. lr: " + str(init_lr) + \
+        " Img dim: " + str(imgc) + " Weights: " + str(ww) + " Optimizer: " + \
+            optmer + " Dataset: " + year
+    '''
+    not working:
+    subprocess.Popen(["tensorboard", "dev", "upload --logdir '" + logdir + \
+                      "' --name LeleNet_" + mod + " --description '" + \
+                          PARAMETERS + "'"])
+    tb_str = "tensorboard dev upload --logdir '" + logdir + \
+                      "' --name LeleNet_" + mod + " --description '" + \
+                          PARAMETERS + "'"
+    '''
+    if tbn is None:
+        tbn = "LeleNet_" + mod + "_" + year
+    subprocess.call("tensorboard dev upload --logdir '" + logdir + \
+                    "' --name " + tbn + " --description '" + \
+                    PARAMETERS + "' &", shell = True)
+
+# fit model--------------------------------------------------------------------
+debug_cp(line = "Fit model...\n")
+args_fit = {"epochs" : epochz,
+            "steps_per_epoch" : np.ceil(N_img/bs),
+            "validation_steps" : np.ceil(N_val/bs),
+            "callbacks" : cllbs}
+if resume_training != "f":
+    try:
+        s = checkpoint.find("Epoch.") + len("Epoch.")
+        e = checkpoint.find("Epoch.") + len("Epoch.") + 2
+        args_fit["initial_epoch"] = int(checkpoint[s : e])
+    except:
+        print("Error when trying to retreive the epoch number from filename",\
+              "'" + checkpoint + "': Unable to find integer at position", \
+                  str(checkpoint.find("Epoch.") + len("Epoch.")), "to", \
+                      str(len(checkpoint)-5))
+
+if "train_generator" in locals() or "train_generator" in globals():
+    '''
+    model.fit(train_generator,
+                     validation_data = val_generator,
+                     **args_fit)
+    '''
+    Warning("Currently no Keras ImageDataGenerators supported.")
+else:
+    if ww != 0.0:
+        hist = model.fit(dataset["train"].map(add_sample_weights),
+                         validation_data = dataset["val"],
+                         **args_fit)
+    else:
+        hist = model.fit(dataset["train"],
+                         validation_data = dataset["val"],
+                         **args_fit)
+
+os.chdir(dir_out())
+with open(dir_out("Hist.txt"), "w") as f:
+            for key in hist.history:
+                f.write(key)
+                f.write("\n")
+
+# save model-------------------------------------------------------------------
+model.save(dir_out("cpts", "trained_mod"), save_format = "tf", \
+           save_traces = True)
+print("Model saved to disc at " + dir_out("cpts", "trained_mod"))
+
+#model = ks.models.load_model(dir_out(),\
+#                             custom_objects = {"MulticlassMeanIoU": mIoU})
+
+# Test results-----------------------------------------------------------------
+moddir = dir_out()
+from matplotlib import pyplot as plt
+from matplotlib.colors import Normalize
+
+tst_dataset = tf.data.Dataset.list_files(
+    dir_tls(myear = year, dset = "X_tst") + os.path.sep + "*." + xf, seed=zeed)
+tst_dataset = tst_dataset.map(parse_image)
+
+N_tst_images = len(tst_dataset)
+
+dataset = {"tst": tst_dataset}
+# test dataset
+dataset["tst"] = dataset["tst"].map(load_image_test)
+#dataset["tst"] = dataset["tst"].repeat()
+dataset["tst"] = dataset["tst"].batch(bs)
+dataset["tst"] = dataset["tst"].prefetch(buffer_size = AUTOTUNE)
+print(dataset["tst"])
+
+def display_sample(display_list, tst = "a"):
+    """Show side-by-side an input image,
+    the ground truth and the prediction.
+    """
+    plt.figure(figsize = (18, 18))
+
+    title = ["Input Image", "True Mask", "Predicted Mask"]
+    plt.subplot(1, len(display_list), 1)
+    plt.title(title[0])
+    plt.imshow(tf.keras.preprocessing.image.array_to_img(display_list[0]))
+    plt.axis("off")
+    for i in range(1, len(display_list)):
+        plt.subplot(1, len(display_list), i+1)
+        plt.title(title[i])
+        plt.imshow(tf.keras.preprocessing.image.array_to_img(display_list[i],\
+                                                             scale = False),
+                   interpolation = "nearest",
+                   cmap = plt.get_cmap("gist_rainbow"),#norm = Normalize(
+                   vmin = 0, vmax = N_CLASSES)#)
+        plt.axis("off")
+    plt.show()
+    plt.savefig(os.path.join(moddir, "Test" + tst + ".png"))
+
+def create_mask(pred_mask: tf.Tensor) -> tf.Tensor:
+    pred_mask = tf.argmax(pred_mask, axis = -1)
+    pred_mask = tf.expand_dims(pred_mask, axis = -1)
+    return pred_mask
+
+def show_predictions(dataset = None, num = 1, t = "a"):
+    if dataset:
+        for image, mask in dataset.take(num):
+            pred_mask = model.predict(image)
+            display_sample([image[0], true_mask, create_mask(pred_mask)])
+    else:
+        one_img_batch = sample_image[0][tf.newaxis, ...]
+        inference = model.predict(one_img_batch)
+        pred_mask = create_mask(inference)
+        display_sample([sample_image[0], sample_mask[0],
+                        pred_mask[0]], tst = t)
+
+# Mask and prediction
+for test in map(chr, range(*map(ord, ["a", "n"]))):
+    if "val_generator" in globals():
+        sample_image, sample_mask = next(val_generator)
+    else:
+        for image, mask in dataset["tst"].take(1):
+            sample_image, sample_mask = image, mask
+    show_predictions(t = test)
+    mask_array = np.array(sample_mask[0])
+    inference = model.predict(np.expand_dims(sample_image[0], axis = 0))
+    pred = create_mask(inference)
+    y_pred, y_true = inference[0], sample_mask[0]
+    mask_vals, mask_counts = np.unique(mask_array, return_counts = True)
+    pred_vals, pred_counts = np.unique(pred, return_counts = True)
+    print("Mask classes:\n", mask_vals)
+    print("Frequencies:\n", mask_counts)
+    print("Predicted classes:\n", pred_vals)
+    print("Frequencies:\n", pred_counts)
+
+# Confusion matrix
+def compute_confusion_matrix_sample(image, mask, cnn):
+    true_array = np.array(mask[0]).astype(int)
+    pred = cnn.predict(np.expand_dims(image[0], axis = 0))
+    pred_array = create_mask(pred)
+    pred_array = np.squeeze(pred_array, axis = 0)
+    K = pred.shape[-1] 
+    matrix = np.zeros((K, K))
+    true_array = true_array.ravel()
+    pred_array = pred_array.ravel()
+    for clss in range(len(true_array)):
+        matrix[true_array[clss]][pred_array[clss]] += 1
+    return matrix
+
+for img, msk in dataset["tst"]:
+    for image, mask in zip(img, msk):
+        if "confusion_matrix" in globals():
+            confusion_matrix = confusion_matrix.__add__(\
+                            compute_confusion_matrix_sample(image, mask, \
+                                                            model))
+        else:
+            confusion_matrix = compute_confusion_matrix_sample(image, mask, \
+                                                               model)
+
+np.savetxt(os.path.join(moddir, "confusion_matr.csv"),\
+           confusion_matrix, delimiter = "\t")
+
+plt.matshow(confusion_matrix, cmap = plt.cm.gray_r)
+plt.savefig(dir_out("Confusion" + ".png"))
