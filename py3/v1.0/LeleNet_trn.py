@@ -717,7 +717,7 @@ if ww != 0.0:
 
 # Get model--------------------------------------------------------------------
 debug_cp(line = "Get model...")
-if kernel_init is not None:
+if kernel_init is not None:################################################### Currently not implemented in U-Net!
     k_initializers = { \
         "he_normal" : "he_normal", \
         "he_uniform" : "he_uniform", \
@@ -737,6 +737,44 @@ if mod == "mod_UNet":
         initializer = ks.initializers.HeNormal() # or "he_normal"
     else:
         initializer = kernel_init
+    # define model blocks
+    #https://github.com/bnsreenu/python_for_image_processing_APEER/blob/master/tutorial119_multiclass_semantic_segmentation.ipynb
+    def conv_block(input, num_filters):
+        x = ks.layers.Conv2D(num_filters, 3, padding = "same")(input)
+        x = ks.layers.BatchNormalization()(x)
+        x = ks.layers.Activation("relu")(x)
+        x = ks.layers.Conv2D(num_filters, 3, padding="same")(x)
+        x = ks.layers.BatchNormalization()(x)
+        x = ks.layers.Activation("relu")(x)
+        return x
+
+    def encoder_block(input, num_filters):
+        x = conv_block(input, num_filters)
+        p = ks.layers.MaxPool2D((2, 2))(x)
+        return x, p
+    
+    def decoder_block(input, skip_features, num_filters):
+        x = ks.layers.Conv2DTranspose(num_filters, (2, 2), strides = 2, padding = "same")(input)
+        return x
+    
+    def build_unet(input_shape, n_classes, filters = 64):
+        inputz = ks.layers.Input(input_shape)
+        s1, p1 = encoder_block(inputz, filters)
+        s2, p2 = encoder_block(p1, (filters * 2))
+        s3, p3 = encoder_block(p2, (filters * 4))
+        s4, p4 = encoder_block(p3, (filters * 8))
+        b1 = conv_block(p4, (filters * 16))
+        d1 = decoder_block(b1, s4, (filters * 8))
+        d2 = decoder_block(d1, s3, (filters * 4))
+        d3 = decoder_block(d2, s2, (filters * 2))
+        d4 = decoder_block(d3, s1, filters)
+        activation = "sigmoid" if n_classes < 2 else "softmax"
+        outputs = ks.layers.Conv2D(n_classes, 1, padding = "same", activation = activation)(d4)
+        model = ks.models.Model(inputz, outputs, name = "UNet")
+        return model
+
+    model = build_unet((imgr, imgc, imgdim), n_classes = N_CLASSES)
+'''
     def UNet(n_classes, input_shape = (imgr, imgc, imgdim), dropout = drop, \
              filters = 64, \
          ops = {"activation" : "relu",
@@ -827,7 +865,7 @@ if mod == "mod_UNet":
 
     # get model
     model = UNet(n_classes = N_CLASSES)
-
+'''
     #-------------------------------------------------------------------------
     # FCDenseNet
 elif mod == "mod_FCD":
