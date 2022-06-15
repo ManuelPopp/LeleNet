@@ -717,7 +717,7 @@ if ww != 0.0:
 
 # Get model--------------------------------------------------------------------
 debug_cp(line = "Get model...")
-if kernel_init is not None:################################################### Currently not implemented in U-Net!
+if kernel_init is not None:
     k_initializers = { \
         "he_normal" : "he_normal", \
         "he_uniform" : "he_uniform", \
@@ -730,20 +730,16 @@ if kernel_init is not None:################################################### C
     #-------------------------------------------------------------------------
     # U-Net
 if mod == "mod_UNet":
-    if kernel_init is None:
-        # as suggested by Ronneberget et al. (2015):
-        # Gaussian distribution with sd of sqrt(2/N) where N = number incoming
-        # nodes of one neuron
-        initializer = ks.initializers.HeNormal() # or "he_normal"
-    else:
-        initializer = kernel_init
+    ops = {"padding" : "same"}
+    if kernel_init is not None:
+        ops["kernel_initializer"] = initializer
     # define model blocks
     #https://github.com/bnsreenu/python_for_image_processing_APEER/blob/master/tutorial119_multiclass_semantic_segmentation.ipynb
     def conv_block(input, num_filters):
-        x = ks.layers.Conv2D(num_filters, 3, padding = "same")(input)
+        x = ks.layers.Conv2D(num_filters, 3, **ops)(input)
         x = ks.layers.BatchNormalization()(x)
         x = ks.layers.Activation("relu")(x)
-        x = ks.layers.Conv2D(num_filters, 3, padding="same")(x)
+        x = ks.layers.Conv2D(num_filters, 3, **ops)(x)
         x = ks.layers.BatchNormalization()(x)
         x = ks.layers.Activation("relu")(x)
         return x
@@ -754,7 +750,7 @@ if mod == "mod_UNet":
         return x, p
     
     def decoder_block(input, skip_features, num_filters):
-        x = ks.layers.Conv2DTranspose(num_filters, (2, 2), strides = 2, padding = "same")(input)
+        x = ks.layers.Conv2DTranspose(num_filters, (2, 2), strides = 2, **ops)(input)
         return x
     
     def build_unet(input_shape, n_classes, filters = 64):
@@ -769,7 +765,8 @@ if mod == "mod_UNet":
         d3 = decoder_block(d2, s2, (filters * 2))
         d4 = decoder_block(d3, s1, filters)
         activation = "sigmoid" if n_classes < 2 else "softmax"
-        outputs = ks.layers.Conv2D(n_classes, 1, padding = "same", activation = activation)(d4)
+        outputs = ks.layers.Conv2D(n_classes, 1, padding = "same", \
+                                   activation = activation)(d4)
         model = ks.models.Model(inputz, outputs, name = "UNet")
         return model
 
