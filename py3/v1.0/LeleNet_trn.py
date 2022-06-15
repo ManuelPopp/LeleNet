@@ -771,7 +771,7 @@ if mod == "mod_UNet":
         return model
 
     model = build_unet((imgr, imgc, imgdim), n_classes = N_CLASSES)
-'''
+    '''
     def UNet(n_classes, input_shape = (imgr, imgc, imgdim), dropout = drop, \
              filters = 64, \
          ops = {"activation" : "relu",
@@ -862,7 +862,7 @@ if mod == "mod_UNet":
 
     # get model
     model = UNet(n_classes = N_CLASSES)
-'''
+    '''
     #-------------------------------------------------------------------------
     # FCDenseNet
 elif mod == "mod_FCD":
