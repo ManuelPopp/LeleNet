@@ -7,6 +7,6 @@ tensorflow==2.8.0
 tensorflow_addons==0.15.0
 tensorflow_gpu==2.8.0
 tensorflow_io==0.24.0
-osgeo
+osgeo==3.2.3
 cryptography==3.4.7
 arcgis==1.8.5.post3
