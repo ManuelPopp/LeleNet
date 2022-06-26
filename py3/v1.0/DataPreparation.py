@@ -30,26 +30,25 @@ def parseArguments():
                         help = "Mask image format; either png, jpg, or tif.",\
                             type = str, default = "png")
     parser.add_argument("-imgr", "--imgr",\
-                        help = "Image x resolution (rows).", type = int,\
+                        help = "Image y resolution (rows).", type = int,\
                             default = 256)
     parser.add_argument("-imgc", "--imgc",\
-                        help = "Image y resolution (columns).", type = int,\
+                        help = "Image x resolution (columns).", type = int,\
                             default = 256)
     parser.add_argument("-imgd", "--imgd",\
-                        help = "Image y resolution (square).", type = int,\
+                        help = "Image resolution (square).", type = int,\
                             default = None)
     parser.add_argument("-ndc", "--ndc",\
-                        help = "No data class.", type = bool,\
-                            default = False)
+                        help = "No data class.", action = "store_true")
     parser.add_argument("-abc", "--abc",\
                         help = "Additional background class.", type = int,\
                             default = -1)
     parser.add_argument("-grp", "--grp",\
-                        help = "Group species by dictionary.", type = bool,\
-                            default = False)
+                        help = "Group species by dictionary.", \
+                            action = "store_true")
     parser.add_argument("-mbd", "--mbd",\
                         help = "Mark bad data in additional mask image" +\
-                            "dimension.", type = bool, default = False)
+                            "dimension.", action = "store_true")
     parser.add_argument("-wd", "--wd",\
                         help = "Alternative working directory.", type = str,\
                             default = "")
@@ -58,8 +57,7 @@ def parseArguments():
                             default = None)
     parser.add_argument("-add", "--add",\
                         help = "Add data for new plots without deleting ol" +\
-                        "d data.", type = bool,\
-                            default = True)
+                        "d data.", action = "store_false")
     parser.add_argument("-mode", "--mode",\
                         help = "Mode: Create tiles from originals or from " +\
                             "orthomosaic. Select either 'raw' or 'ortho' " +\
