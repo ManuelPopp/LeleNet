@@ -16,8 +16,8 @@ import argparse, pickle
 def parseArguments():
     parser = argparse.ArgumentParser()
     # Positional mandatory arguments
-    parser.add_argument("model", help = "Model; one in U-Net, FCDenseNet).", \
-                        type = str)
+    parser.add_argument("model", help = "Model; one in U-Net," + \
+                        "FCDenseNet, DeepLabV3.", type = str)
     parser.add_argument("bs", help = "Batchsize.",\
                         type = int)
     parser.add_argument("ep", help = "Training epochs.",\
@@ -65,7 +65,10 @@ def parseArguments():
                         help = "Image dimensions (rows = columns).",\
                             type = int, default = None)
     parser.add_argument("-imgdim", "--imgdim",\
-                        help = "X image dimensions (colours).", type = int,\
+                        help = "X colour bands (channels).", type = int,\
+                            default = 3)
+    parser.add_argument("-nb", "--nb",\
+                        help = "Number of bands (channels).", type = int,\
                             default = 3)
     parser.add_argument("-nc", "--nc",\
                         help = "Number of classes.", type = int,\
@@ -104,14 +107,14 @@ def parseArguments():
                                 " default), 't' (True), or folder name."), \
                             type = str, default = "f")
     parser.add_argument("-save_settings", "--sv",\
-                        help = "Save training settings.", type = bool,\
-                            default = True)
+                        help = "Save training settings.", \
+                            action = "store_false")
     parser.add_argument("-debug", "--debug",\
-                        help = "Write successful steps to txt.", type = bool,\
-                            default = False)
+                        help = "Write successful steps to txt.", \
+                            action = "store_true")
     parser.add_argument("-tb", "--tb",\
                         help = "Export graphs to TensorBoard dev.", \
-                            type = bool, default = True)
+                            action = "store_false")
     parser.add_argument("-tbn", "--tbn",\
                         help = "Alternative TensorBoard experiment name.", \
                             type = str, default = None)
@@ -434,9 +437,9 @@ def parse_image(img_path: str) -> dict:
     # read image
     image = tf.io.read_file(img_path)
     if xf == "png":
-        image = tf.image.decode_png(image, channels = 3)
+        image = tf.image.decode_png(image, channels = imgdim)
     elif xf == "jpg":
-        image = tf.image.decode_jpeg(image, channels = 3)
+        image = tf.image.decode_jpeg(image, channels = imgdim)
     elif xf == "tif":
         import tensorflow_io as tfio
         image = tfio.experimental.image.decode_tiff(image)
@@ -504,45 +507,11 @@ def load_image_train(datapoint: dict) -> tuple:
     '''
     ###########################################################################
     ## experimental augmentation
-    '''
-    # random rotation OLD VERSION, IMPROVED VERSION SEE BELOW
-    angle = np.random.rand(1) * 2.0 * np.pi
-    input_image = tfa.image.rotate(input_image, \
-                                   angle, \
-                                       interpolation = "nearest", \
-                                           fill_mode = "reflect")
-    input_mask = tfa.image.rotate(input_mask, \
-                                  angle, \
-                                      interpolation = "nearest", \
-                                          fill_mode = "reflect")
-    # resize to (almost) fill original image
-    # random scaling (do not use): = ((tf.random.uniform(()) * 0.2) + 0.8)
-    # added 1, divided by 2 to reduce filled area while keeping resize at not
-    # too extreme zoom levels
-    scaling = (np.sqrt(1.0 + np.abs(np.sin(angle / 2))) + 1) / 2
-    input_image = tf.image.resize(input_image, \
-                                  (int(imgr * scaling), \
-                                   int(imgc * scaling)), \
-                                      method = "lanczos3")
-    input_mask = tf.image.resize(input_mask, \
-                                 (int(imgr * scaling), \
-                                  int(imgc * scaling)), \
-                                     method = "nearest")
-    # clip to original size (central crop as fraction of scaled image)
-    fraction = np.clip(1.0 / scaling, 1.0 / (imgr * scaling), 1.0)
-    input_image = tf.image.central_crop(input_image, \
-                                        central_fraction = fraction)
-    input_mask = tf.image.central_crop(input_mask, \
-                                       central_fraction = fraction)
-    # resize to original size (not as fraction but fix int value) to make sure
-    # images have the original resolution (prevent potential rounding errors)
-    input_image = tf.image.resize(input_image, (imgr, imgc), \
-                                  method = "lanczos3")
-    input_mask = tf.image.resize(input_mask, (imgr, imgc), \
-                                  method = "nearest")
-    '''
     # calculate upscaling through rotation
-    angle = np.random.rand(1) * 2.0 * np.pi
+    #angle = np.random.rand(1) * 2.0 * np.pi
+    angle = np.random.rand(1) * 0.7
+    if angle > 0.35:
+        angle += (2 * np.pi - 0.7)
     remainder = angle % (0.5 * np.pi)
     scaled_by_rotation = (np.sin(remainder) + np.cos(remainder)).item()
     
@@ -730,6 +699,9 @@ if kernel_init is not None:
     #-------------------------------------------------------------------------
     # U-Net
 if mod == "mod_UNet":
+    # Suggested by Ronneberget et al. (2015):
+    # Gaussian distribution with sd of sqrt(2/N) where N = number incoming
+    # nodes of one neuron -> he_normal
     ops = {"padding" : "same"}
     if kernel_init is not None:
         ops["kernel_initializer"] = initializer
@@ -750,7 +722,8 @@ if mod == "mod_UNet":
         return x, p
     
     def decoder_block(input, skip_features, num_filters):
-        x = ks.layers.Conv2DTranspose(num_filters, (2, 2), strides = 2, **ops)(input)
+        x = ks.layers.Conv2DTranspose(num_filters, (2, 2), \
+                                      strides = 2, **ops)(input)
         return x
     
     def build_unet(input_shape, n_classes, filters = 64):
@@ -769,100 +742,9 @@ if mod == "mod_UNet":
                                    activation = activation)(d4)
         model = ks.models.Model(inputz, outputs, name = "UNet")
         return model
-
     model = build_unet((imgr, imgc, imgdim), n_classes = N_CLASSES)
-    '''
-    def UNet(n_classes, input_shape = (imgr, imgc, imgdim), dropout = drop, \
-             filters = 64, \
-         ops = {"activation" : "relu",
-                "padding" : "same",
-                "kernel_initializer" : initializer
-        }):
-        # input layer
-        inputz = ks.layers.Input(shape = input_shape)
-        
-        # encoder part
-        ## 1st convolution
-        c1 = ks.layers.Conv2D(filters, (3, 3), **ops)(inputz)
-        c1 = ks.layers.Conv2D(filters, (3, 3), **ops)(c1)
-        ## 1st max pooling
-        p1 = ks.layers.MaxPooling2D(pool_size = (2, 2))(c1)
-        
-        ## 2nd convolution
-        c2 = ks.layers.Conv2D(filters*2, (3, 3), **ops)(p1)
-        c2 = ks.layers.Conv2D(filters*2, (3, 3), **ops)(c2)
-        ## 2nd max pooling
-        p2 = ks.layers.MaxPooling2D(pool_size = (2, 2))(c2)
-        
-        ## 3rd convolution
-        c3 = ks.layers.Conv2D(filters*4, (3, 3), **ops)(p2)
-        c3 = ks.layers.Conv2D(filters*4, (3, 3), **ops)(c3)
-        ## 3rd max pooling
-        p3 = ks.layers.MaxPooling2D(pool_size = (2, 2))(c3)
-        
-        ## 4th convolution
-        c4 = ks.layers.Conv2D(filters*8, (3, 3), **ops)(p3)
-        c4 = ks.layers.Conv2D(filters*8, (3, 3), **ops)(c4)
-        ## Drop
-        d4 = ks.layers.Dropout(dropout)(c4)
-        ## 4th max pooling
-        p4 = ks.layers.MaxPooling2D(pool_size = (2, 2))(d4)
-        
-        ## 5th convolution
-        c5 = ks.layers.Conv2D(filters*16, (3, 3), **ops)(p4)
-        c5 = ks.layers.Conv2D(filters*16, (3, 3), **ops)(c5)
-        ## Drop
-        d5 = ks.layers.Dropout(dropout)(c5)
-        
-        # decoder part
-        ## 1st up convolution
-        us6 = ks.layers.UpSampling2D(size = (2, 2))(d5)
-        up6 = ks.layers.Conv2D(filters*8, (2, 2), **ops)(us6)
-        ## merge
-        ct6 = ks.layers.concatenate([d4, up6], axis = 3)
-        uc6 = ks.layers.Conv2D(filters*8, (3, 3), **ops)(ct6)
-        uc6 = ks.layers.Conv2D(filters*8, (3, 3), **ops)(uc6)
-        
-        ## 2nd up convolution
-        us7 = ks.layers.UpSampling2D(size = (2, 2))(uc6)
-        up7 = ks.layers.Conv2D(filters*4, (2, 2), **ops)(us7)
-        ## merge
-        ct7 = ks.layers.concatenate([c3, up7], axis = 3)
-        uc7 = ks.layers.Conv2D(filters*4, (3, 3), **ops)(ct7)
-        uc7 = ks.layers.Conv2D(filters*4, (2, 2), **ops)(uc7)
-         
-        ## 3rd up convolution
-        us8 = ks.layers.UpSampling2D(size = (2, 2))(uc7)
-        up8 = ks.layers.Conv2D(filters*2, (2, 2), **ops)(us8)
-        ## merge
-        ct8 = ks.layers.concatenate([c2, up8], axis = 3)
-        uc8 = ks.layers.Conv2D(filters*2, (3, 3), **ops)(ct8)
-        uc8 = ks.layers.Conv2D(filters*2, (3, 3), **ops)(uc8)
-         
-        ## 4th up convolution
-        us9 = ks.layers.UpSampling2D(size = (2, 2))(uc8)
-        up9 = ks.layers.Conv2D(filters, (2, 2), **ops)(us9)
-        ## merge
-        ct9 = ks.layers.concatenate([c1, up9], axis = 3)
-        uc9 = ks.layers.Conv2D(filters, (3, 3), **ops)(ct9)
-        uc9 = ks.layers.Conv2D(filters, (3, 3), **ops)(uc9)
-        uc9 = ks.layers.Conv2D(2, (3, 3), **ops)(uc9)
-        
-        # output layer
-        if n_classes > 2:
-            outputz = ks.layers.Conv2D(n_classes, (1, 1), \
-                                       activation = "softmax")(uc9)
-        else:
-            outputz = ks.layers.Conv2D(1, (1, 1), activation = "sigmoid")(uc9)
-    
-        model = ks.Model(inputs = inputz, outputs = outputz)
-        print(model.summary())
-        print(f'Total number of ks.layers: {len(model.layers)}')
-        return model
-
-    # get model
-    model = UNet(n_classes = N_CLASSES)
-    '''
+    print(model.summary())
+    print(f'Total number of ks.layers: {len(model.layers)}')
     #-------------------------------------------------------------------------
     # FCDenseNet
 elif mod == "mod_FCD":
@@ -1096,7 +978,7 @@ def step_decay_schedule(initial_lr = init_lr,
 '''
 Using some simple built-in learning rate decay:
 '''
-if init_lr is not None:
+if decay_lr is not None:
     lr_sched = ks.optimizers.schedules.ExponentialDecay(
     initial_learning_rate = init_lr,
     # decay after n steps
@@ -1109,6 +991,12 @@ if init_lr is not None:
                                   clipnorm = 1), \
         "rms" : ks.optimizers.RMSprop(learning_rate = lr_sched, \
                                       clipnorm = 1)
+        }
+elif init_lr is not None:
+    optimizers = {
+        "adam" : ks.optimizers.Adam(learning_rate = init_lr),
+        "sgd" : ks.optimizers.SGD(learning_rate = init_lr),
+        "rms" : ks.optimizers.RMSprop(learning_rate = init_lr)
         }
 else:
     optimizers = {
@@ -1175,28 +1063,52 @@ def dice_loss(y_true, y_pred):
 ### get intersect. over union (original function gives error -> updated accor-
 ### ding to https://stackoverflow.com/a/61826074/11611246)
 # mIoU = ks.metrics.MeanIoU(n_classes = N_CLASSES)
-class MulticlassMeanIoU(tf.keras.metrics.MeanIoU):
+#@ks.utils.register_keras_serializable(package = "Custom", \
+#                                      name = "MulticlassMeanIoU")
+class SparseMeanIoU(ks.metrics.MeanIoU):
     def __init__(self,
                  y_true = None,
                  y_pred = None,
                  num_classes = None,
-                 name = "Multi_MeanIoU",
+                 name = "Sparse_MeanIoU",
                  dtype = None):
-        super(MulticlassMeanIoU, self).__init__(num_classes = num_classes,
+        super(SparseMeanIoU, self).__init__(num_classes = num_classes,
                                              name = name, dtype = dtype)
-        self.__name__ = name
-
+        #self.__name__ = "Sparse_MeanIoU"
+    def get_config(self):
+        return {"num_classes": self.num_classes, \
+                "name": self.name, \
+                    "dtype": self._dtype}
+    '''
+    @classmethod
+    def from_config(cls, config):
+        return cls(**config)
+    '''
     def update_state(self, y_true, y_pred, sample_weight = None):
         y_pred = tf.math.argmax(y_pred, axis = -1)
         return super().update_state(y_true, y_pred, sample_weight)
+    def __getstate__(self):
+        variables = {v.name: v.numpy() for v in self.variables}
+        state = { \
+            name: variables[var.name] \
+                for name, var in self._unconditional_dependency_names.items() \
+                    if isinstance(var, tf.Variable)}
+        state["name"] = self.name
+        state["num_classes"] = self.num_classes
+        return state
+    def __setstate__(self, state):
+        self.__init__(name = state.pop("name"), \
+            num_classes = state.pop("num_classes"))
+        for name, value in state.items():
+            self._unconditional_dependency_names[name].assign(value)
 
 if mk == "f1":
     met = tfa.metrics.F1Score(num_classes = N_CLASSES, threshold = 0.5)
     met.__name__ = "f1"
     print("Using metric f1-score")
 else:
-    mIoU = MulticlassMeanIoU(num_classes = N_CLASSES)
-    met = MulticlassMeanIoU(num_classes = N_CLASSES)
+    #mIoU = MulticlassMeanIoU(num_classes = N_CLASSES)
+    met = SparseMeanIoU(num_classes = N_CLASSES)
     print("Using metric mIoU")
 
 metrix = [met, "sparse_categorical_accuracy"] if N_CLASSES > 2 else \
@@ -1209,7 +1121,7 @@ lozz = ks.losses.SparseCategoricalCrossentropy() if N_CLASSES > 2 else\
 #run_opts = tf.compat.v1.RunOptions(report_tensor_allocations_upon_oom = True)
 
 # callbacks--------------------------------------------------------------------
-monitor_metric = cb_metric if cb_metric is not None else "val_" + met.__name__
+monitor_metric = cb_metric if cb_metric is not None else "val_" + met.name
 cllbs = [
     #ks.callbacks.ReduceLROnPlateau(monitor = "val_loss", factor = 0.2,
     #                               patience = 5, min_lr = 0.001),
@@ -1268,7 +1180,7 @@ if resume_training != "f":
     #try:
     model = ks.models.load_model(checkpoint, \
                                  custom_objects = \
-                                     {"MulticlassMeanIoU": mIoU})
+                                     {"SparseMeanIoU": met})#{met.__name__: met})
     #except:
     #    print("Failed to load model from", checkpoint)
     all_logs = [dir_out("logs", p) for p in os.listdir(dir_out("logs"))]
@@ -1344,7 +1256,12 @@ with open(dir_out("Hist.txt"), "w") as f:
 # save model-------------------------------------------------------------------
 model.save(dir_out("cpts", "trained_mod"), save_format = "tf", \
            save_traces = True)
+model.save(dir_out("cpts", "trained_mod", "model.h5"), save_format = "h5")
 print("Model saved to disc at " + dir_out("cpts", "trained_mod"))
+
+# save custom metrics----------------------------------------------------------
+with open(dir_out("cpts", "trained_mod", "custom_metrics.pkl"), "wb") as f:
+    pickle.dump(met, f)
 
 #model = ks.models.load_model(dir_out(),\
 #                             custom_objects = {"MulticlassMeanIoU": mIoU})
@@ -1454,5 +1371,6 @@ for img, msk in dataset["tst"]:
 np.savetxt(os.path.join(moddir, "confusion_matr.csv"),\
            confusion_matrix, delimiter = "\t")
 
-plt.matshow(confusion_matrix, cmap = plt.cm.gray_r)
-plt.savefig(dir_out("Confusion" + ".png"))
+#plt.matshow(confusion_matrix, cmap = plt.cm.gray_r)
+#plt.savefig(dir_out("Confusion" + ".png"))
+plt.savefig(os.path.join(moddir, "Confusion" + ".png"))
