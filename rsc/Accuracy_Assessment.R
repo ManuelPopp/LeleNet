@@ -12,20 +12,25 @@ for(i in 1:NROW(packages)){
 #############################################
 ##### Get rasters
 #############################################
-path <- "G:/Masterarbeit/dat/test_1024_21"
-msk_tif_name <- "ortho_B4_1_MASK.tif"
-prd_tif_name <- "ortho_B4_1_PRED.tif"
+path <- "G:/Masterarbeit/dat/test_D1024"
+msk_tif_name <- "ortho_B7_5_MASK.tif"
+prd_tif_name <- "ortho_B7_5_PRED.tif"
 
 ground_truth <- raster::raster(file.path(path, msk_tif_name))
 prediction <- raster::raster(file.path(path, prd_tif_name))
 
 tilesize <- 1024
-offset <- tilesize/2
+offset <- tilesize/1.5
 r <- nrow(prediction)
 c <- ncol(prediction)
+orig_ex <- raster::extent(prediction)
 crop_ex <- raster::extent(prediction,
                           offset, (r - offset),
                           offset, (c - offset))
+
+plot(prediction)
+plot(orig_ex, add = TRUE, col = "red")
+plot(crop_ex, add = TRUE, col = "blue")
 
 ground_truth <- raster::crop(ground_truth, crop_ex)
 prediction <- raster::crop(prediction, crop_ex)
