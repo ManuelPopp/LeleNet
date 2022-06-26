@@ -7,9 +7,9 @@ set /p out_name="Enter output filename: "
 set /p mod_name="Enter model name: "
 set /p gpu_use="Use GPU (y/n): "
 IF "%gpu_use%"=="y" (
-    set ugpu==True
+    set ugpu= -gpu
 ) ELSE (
-    set ugpu==False
+    set ugpu=
 )
 set omk_path=%omk_dir%%mod_name%\%omk_name%.tif
 set out_path=%out_dir%%mod_name%\%out_name%.tif
@@ -18,6 +18,6 @@ set mod_path=%mod_dir%%mod_name%%mod_subdir%
 @echo Input: %omk_path%
 @echo Output: %out_path%
 @echo Model: %mod_path%
-py D:\Dateien\Studium_KIT\Master_GOEK\Masterarbeit\py3\LeleNet_prd.py %omk_path% %out_path% %mod_path% -rol 0.25 -col 0.25 -gpu %ugpu%
+py D:\Dateien\Studium_KIT\Master_GOEK\Masterarbeit\py3\LeleNet_prd.py %omk_path% %out_path% %mod_path% -rol 0.25 -col 0.25%ugpu%
 @echo Completed: %date% %time%
 pause
