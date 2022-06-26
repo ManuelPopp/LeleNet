@@ -77,3 +77,7 @@ classnames[nrow(classnames), c(2, 3)] <- c("Background", "None")
 
 # create table
 acc_table <- data.frame(Class = classnames$Name, ResultF1 = F1Score)
+# write to clipboard (paste to Excel)
+writeClipboard(acc_table$Class)
+writeClipboard(as.character(acc_table$ResultF1))
+accuracy
