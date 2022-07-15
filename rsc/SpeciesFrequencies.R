@@ -81,15 +81,15 @@ hist(class_frequencies, col = cols[1])
 
 class_frequencies_df = data.frame(share = class_frequencies)
 gg_hist <- ggplot(data = class_frequencies_df, aes(x = share)) +
-  geom_histogram(fill = cols[1]) +
-  xlab("Share") +
+  geom_histogram(fill = cols[2], binwidth = 0.02) +
+  xlab("Share on total cover") +
   ylab("Number of classes")
 gg_hist
 
 w <- w_90mm
 h <- w * 3 / 4
 
-pdf("D:/Dateien/Studium_KIT/Master_GOEK/Masterarbeit/fig/ClassFreqHist.pdf",
+pdf("D:/Dateien/Studium_KIT/Master_GOEK/Masterarbeit/fig/ClassFreqHistA.pdf",
     width = w, height = h)
 gg_hist
 dev.off()

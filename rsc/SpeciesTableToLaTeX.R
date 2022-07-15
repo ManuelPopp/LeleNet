@@ -111,7 +111,7 @@ df_all_spec <- df_all_spec[with(df_all_spec,
                                 order(df_all_spec$Genus, df_all_spec$Epithet)), ]
 
 print(xtable(df_all_spec,
-             caption = "List of all tree species found in the research plots. Taxon names and information were semiautomatically matched and manuelly checked following World Flora Online (Kindt, 2021; WFO, 2022).",
+             caption = "List of all tree species found in the research plots. Taxon names and information were semiautomatically matched and manually checked following World Flora Online (Kindt, 2021; WFO, 2022).",
              label = "tab:Secies_list"),
       table.placement = "pbht",
       caption.placement = "top",
@@ -120,16 +120,16 @@ print(xtable(df_all_spec,
       file = file.path(db, "tab", "Species_List.tex"),
       add.to.row = list(list(nrow(df_all_spec)),  
                         '\\bottomrule\n\\multicolumn{5}{l}{Kindt, Roeland (2020). \\enquote{WorldFlora: An R Package for Exact and Fuzzy Matching of Plant Names against
-the World Flora Online Taxonomic Backbone Data}.}\\\\\n \\multicolumn{5}{l}{\\hspace{1em} In: openitshapeApplications in Plant Sciencescloseitshape 8. 9, e11388. issn: 2168-0450. doi: \\href{https://doi.org/10.1002/aps3.11388}{10.1002/aps3.11388}.}\\\\\n \\multicolumn{5}{l}{WFO (2022): World Flora Online. Published on the Internet; \\url{http://www.worldfloraonline.org}. Accessed on: 06 Feb 2022.}\\\\'))
+                        the World Flora Online Taxonomic Backbone Data}.}\\\\\n \\multicolumn{5}{l}{\\hspace{1em} In: openitshapeApplications in Plant Sciencescloseitshape 8. 9, e11388. issn: 2168-0450. doi: \\href{https://doi.org/10.1002/aps3.11388}{10.1002/aps3.11388}.}\\\\\n \\multicolumn{5}{l}{WFO (2022): World Flora Online. Published on the Internet; \\url{http://www.worldfloraonline.org}. Accessed on: 06 Feb 2022.}\\\\'))
 # adjust table size
 text_file <- readLines(file.path(db, "tab", "Species_List.tex"))
 text_file <- c(text_file[1:6], "\\resizebox{\\textwidth}{!}{", text_file[7:length(text_file)])
 text_file <- c(text_file[1:length(text_file)-1], "}", text_file[length(text_file)])
 text_file <- gsub("1947 \\[Sep 1947\\]", "(1947)", text_file, perl = TRUE)
 text_file <- gsub("caption", "caption[Species list]", text_file)
-text_file <- gsub("Ã¤", '\\\\"a', text_file)
-text_file <- gsub("Ã¼", '\\\\"u', text_file)
-text_file <- gsub("Ã©", "\\\\'e", text_file)
+text_file <- gsub("ä", '\\\\"a', text_file)
+text_file <- gsub("ü", '\\\\"u', text_file)
+text_file <- gsub("é", "\\\\'e", text_file)
 text_file <- stri_replace_last(text_file, fixed = "\\\\ \\bottomrule", replacement = "\\\\")
 text_file <- gsub("openitshape", "\\\\textit\\{", text_file)
 text_file <- gsub("closeitshape", "\\}", text_file)

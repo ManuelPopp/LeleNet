@@ -71,7 +71,7 @@ gg_clim <- ggplot(data = T_M_summary, aes(x = DoY_S, y = avr)) +
   scale_x_continuous(name = element_blank(),
                      breaks = p_F_summary$DoY_S,
                      labels = p_F_summary$M) +
-  scale_y_continuous(name = "Temperature [Â°C]", sec.axis = sec_axis(~ . * 2, name = "Precipitation [mm]")) +
+  scale_y_continuous(name = "Temperature [°C]", sec.axis = sec_axis(~ . * 2, name = "Precipitation [mm]")) +
   theme(legend.position = "none") +
   scale_color_discrete(cols)
 
