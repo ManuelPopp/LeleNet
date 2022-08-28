@@ -1,0 +1,6 @@
+pandas==1.2.4
+osgeo==3.2.3
+cryptography==3.4.7
+arcgis==1.8.5.post3
+numpy==1.21.3
+Pillow==9.0.1
