@@ -28,6 +28,13 @@ def parseArguments():
                         type = float, default = None)
     parser.add_argument("-ndv", "--ndv", help = "No data value.", \
                         type = int, default = 255)
+    parser.add_argument("-lim", "--lim", help = "Limit for minimal class " + \
+                        "probability. Classes predicted with lower certain" + \
+                            "ty are assigned the class defined by -repl.", \
+                        type = float, default = None)
+    parser.add_argument("-repl", "--repl", help = "Integer to assign unc"+ \
+                        "ertain pixels to. See also -lim. Default = -ndv.", \
+                        type = int, default = None)
     # Note: Tested successfully with DeepLabv3+, NVIDIA GeForce GTX 970 (4 GB),
     # and 512 pixel tile dimension. 1024 px will cause OOM with this GPU model.
     parser.add_argument("-gpu", "--gpu", help = "Enable GPU usage.", \
@@ -49,18 +56,30 @@ if type(GPU) is not bool:
     GPU = (GPU.casefold()=="true")
 
 no_data_value = args.ndv
+limit = args.lim
+
+import tensorflow as tf
+from tensorflow import keras as ks
+rpl = tf.constant(args.repl, dtype = tf.int64) if args.repl is not None else \
+    tf.constant(no_data_value, dtype = tf.int64)
+
+def replace_uncertain(tensor, replacement = rpl, threshold = limit):
+    prob = tf.nn.softmax(tensor, axis = -1)
+    max_prob = tf.reduce_max(prob, axis = -1)
+    pred_msk = tf.argmax(y, axis = -1)
+    shape = pred_msk.shape
+    replacements = tf.fill(shape, replacement)
+    result = tf.where(max_prob < threshold, replacements, pred_msk)
+    return result
 
 tmp_dir = tempfile.mkdtemp()
 
 if os.path.isfile(path_model):
-    path_model = pathlib.Path(path_model).parent.absolute()
+    path_model_parent = pathlib.Path(path_model).parent.absolute()
 else:
-    path_model = pathlib.Path(path_model)
+    path_model_parent = pathlib.Path(path_model)
 
 #### load model and custom objects---------------------------------------------
-import tensorflow as tf
-from tensorflow import keras as ks
-
 # enable/disable GPU mode
 print("Selected option: GPU=" + str(GPU) + ".")
 if GPU:
@@ -78,7 +97,7 @@ else:
               "once initialized.")
 
 # Load custom metrics
-path_custom_metrics = path_model.glob("*metric*.pkl")
+path_custom_metrics = path_model_parent.glob("*metric*.pkl")
 path_custom_metrics = [p for p in path_custom_metrics][0]
 '''
 class SparseMeanIoU():
@@ -190,7 +209,10 @@ if os.path.exists(path_omk):
                 window = np.transpose(window, (1, 2, 0))
                 
                 y = model.predict(np.expand_dims(window, axis = 0))
-                pred_mask = tf.argmax(y, axis = -1)
+                if limit is None:
+                    pred_mask = tf.argmax(y, axis = -1)
+                else:
+                    pred_mask = replace_uncertain(y)
                 pred_mask = pred_mask.astype("uint8")
                 pred_mask = np.squeeze(pred_mask, axis = 0)
                 outBAND.WriteArray(pred_mask, xmin, ymin)
@@ -216,20 +238,31 @@ if os.path.exists(path_omk):
             while clap * j < imgc:
                 coff = clap * j
                 print("Running with x offset " + str(coff), flush = True)
-                xmin = coff
+                xmin = 0
                 if b > 1:
                     tmpDS.AddBand()
                 tmpband = tmpDS.GetRasterBand(b)
+                tmpband.SetNoDataValue(no_data_value)
                 print("Writing band " + str(b), flush = True)
                 # iterate through rows and columns of the image
-                while xmin < (n_cols - imgc):
-                    ymin = roff
-                    while ymin < (n_rows - imgr):
+                while xmin < n_cols:
+                    if coff > 0 and xmin == imgc:
+                        xmin = coff
+                    xmin = (n_cols - imgc) if (xmin + imgc) > n_cols else xmin
+                    ymin = 0
+                    while ymin < n_rows:
+                        if roff > 0 and ymin == imgr:
+                            ymin = roff
+                        if (ymin + imgr) > n_rows:
+                            ymin = (n_rows - imgr)
                         window = omk.ReadAsArray(xmin, ymin, imgc, imgr)
                         window = window / 255.0
                         window = np.transpose(window, (1, 2, 0))
                         y = model.predict(np.expand_dims(window, axis = 0))
-                        pred_mask = tf.argmax(y, axis = -1)
+                        if limit is None:
+                            pred_mask = tf.argmax(y, axis = -1)
+                        else:
+                            pred_mask = replace_uncertain(y)
                         pred_mask = pred_mask.astype("uint8")
                         pred_mask = np.squeeze(pred_mask, axis = 0)
                         tmpband.WriteArray(pred_mask, xmin, ymin)
