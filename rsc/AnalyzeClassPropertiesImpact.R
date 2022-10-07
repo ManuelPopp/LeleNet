@@ -160,6 +160,8 @@ summary(lin_mod)
 
 d <- dat[class_range,]
 l <- cbind(summary_lsm[class_range,], summary_lsm_tst[class_range,-1])
+metric_names <- names(summary_lsm)[-1]
+names(l) <- c("Class", paste0(metric_names, "_train"), paste0(metric_names, "_test"))
 correlations_p <- data.frame(Model = names(d[, -1]))
 correlations_b <- data.frame(Model = names(d[, -1]))
 for(metric in names(l[, -1])){
@@ -179,6 +181,98 @@ for(metric in names(l[, -1])){
   correlations_p[, metric] <- cor_p
   correlations_b[, metric] <- cor_b
 }
+
+# Write appendix tables with full model details
+sigfill <- function(x, sigfigs = 3){
+  out <- gsub("\\.$", "",
+              formatC(signif(x, digits = sigfigs),
+                      digits = sigfigs, format = "fg", flag = "#"))
+  out[grepl(".", out, fixed = TRUE)] <- strtrim(out[grepl(".", out, fixed = TRUE)],
+                                                sigfigs + c(1, 2)[grepl("-", out, fixed = TRUE) + 1])
+  return(out)
+}
+
+full_table <- data.frame(Model = correlations_p$Model)
+for(j in 2:ncol(correlations_p)){
+  full_table[, j] <- paste(
+    sigfill(correlations_b[, j], 3), sigfill(correlations_p[, j], 3), sep = " & "
+  )
+}
+full_table[, 1] <- c(rep(c(256, 512, 1024), 3), 512, 512)
+full_table <- cbind(c("U-Net", " ", " ", "FC-DenseNet", " ", " ", "DeepLabv3+", " ", " ", "DL 2021", "DL 2022"),
+                    full_table)
+names(full_table) <- seq(1, ncol(full_table))
+
+## Train ds
+LSM_train <- tempfile()
+write.table(full_table[, c(1:5)], file = LSM_train,
+            col.names = c("\\multirow{2}{*}{{Model}}", "\\multirow{2}{*}{{Tile size}}",
+                          "\\multicolumn{2}{c}{Mean patch area}",
+                          "\\multicolumn{2}{c}{Class area}",
+                          "\\multicolumn{2}{c}{Compactness}"),
+            row.names = FALSE, sep = " & ", eol = "\\\\\n", quote = FALSE)
+tmp0 <- readLines(LSM_train)
+writeLines(paste(c("\\toprule",
+                tmp[1],
+                "& & {slope} & {\\textit{p}-value} & {slope} & {\\textit{p}-value} & {slope} & {\\textit{p}-value} \\\\",
+                "\\midrule",
+                tmp[-1],
+                "\\bottomrule"), collapse = "\n"),
+           con = LSM_train)
+## Test ds
+LSM_test <- tempfile()
+write.table(full_table[, c(1, 2, 6:8)], file = LSM_test,
+            col.names = c("\\multirow{2}{*}{{Model}}", "\\multirow{2}{*}{{Tile size}}",
+                          "\\multicolumn{2}{c}{Mean patch area}",
+                          "\\multicolumn{2}{c}{Class area}",
+                          "\\multicolumn{2}{c}{Compactness}"),
+            row.names = FALSE, sep = " & ", eol = "\\\\\n", quote = FALSE)
+tmp1 <- readLines(LSM_test)
+writeLines(paste(c("\\toprule",
+                   tmp[1],
+                   "& & {slope} & {\\textit{p}-value} & {slope} & {\\textit{p}-value} & {slope} & {\\textit{p}-value} \\\\",
+                   "\\midrule",
+                   tmp[-1],
+                   "\\bottomrule"), collapse = "\n"),
+           con = LSM_test)
+
+## create combined table
+writeLines(
+  paste(c("\\begin{table}[hbtp]\n
+     \\caption[Linear correlations between F1-Score and class properties]{Linear correlations between F1-Score and class properties as expressed through the metrics mean patch area (in ha), total class area (in ha) and compactness of patches (mean smallest circumscribing circle for patches of the class).}\n
+     \\label{tab:LSM_full}\n
+    \\begin{subtable}[h]{\\textwidth}\n
+    \\caption{Training data}\n
+       \\label{tab:LSMtraining}\n
+        \\centering\n
+        \\begin{tabular}{lrS[table-format=-3.2]S[table-format=1.2]S[table-format=1.2]S[table-format=1.2]S[table-format=-1.2]S[table-format=1.2]}",
+          "\\toprule",
+          tmp0[1],
+          "& & {slope} & {\\textit{p}-value} & {slope} & {\\textit{p}-value} & {slope} & {\\textit{p}-value} \\\\",
+          "\\midrule",
+          tmp0[-1],
+          "\\bottomrule",
+          "\\end{tabular}\n
+          \\end{subtable}\n
+          \\begin{subtable}[h]{\\textwidth}\n
+          \\caption{Test data}\n
+          \\label{tab:LSMtest}\n
+          \\centering\n
+          \\begin{tabular}{lrS[table-format=3.2]S[table-format=1.2]S[table-format=-1.2]S[table-format=1.2]S[table-format=-1.2]S[table-format=1.2]}",
+          "\\toprule",
+          tmp1[1],
+          "& & {slope} & {\\textit{p}-value} & {slope} & {\\textit{p}-value} & {slope} & {\\textit{p}-value} \\\\",
+          "\\midrule",
+          tmp1[-1],
+          "\\bottomrule",
+          "\\end{tabular}\n
+     \\end{subtable}\n
+\\end{table}"
+        ), collapse = "\n"),
+  con = file.path(dir_dropbox, "/tab/LSM_full.tex")
+)
+
+# Add asterisks for summary table in text body
 for(j in 2:ncol(correlations_b)){
   correlations_b[, j] <- signif(correlations_b[, j], 3)
   correlations_b[, j] <- as.character(correlations_b[, j])
