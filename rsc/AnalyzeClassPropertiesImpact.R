@@ -239,7 +239,7 @@ writeLines(paste(c("\\toprule",
 ## create combined table
 writeLines(
   paste(c("\\begin{table}[hbtp]\n
-     \\caption[Linear correlations between F1-Score and class properties]{Linear correlations between F1-Score and class properties as expressed through the metrics mean patch area (in ha), total class area (in ha) and compactness of patches (mean smallest circumscribing circle for patches of the class).}\n
+     \\caption[Linear models relating F1-Score and class properties]{Slope and \textit{p}-value of linear models relating F1-Score and class properties as expressed through the metrics mean patch area (in ha), total class area (in ha) and compactness of patches (mean smallest circumscribing circle for patches of the class). Degrees of freedom = 14.}\n
      \\label{tab:LSM_full}\n
     \\begin{subtable}[h]{\\textwidth}\n
     \\caption{Training data}\n
