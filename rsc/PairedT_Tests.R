@@ -43,7 +43,7 @@ for(j in 2:ncol(dat)){
   dat[, j] <- as.numeric(dat[, j])
 }
 
-dat_l <- reshape2::melt(dat, id.var = "Class")
+dat_l <- reshape2::melt(dat[seq(1, 16), seq(1, 10)], id.var = "Class")
 dat_l$Tilesize <- as.numeric(sub("\\w", "", dat_l$variable))
 dat_l$CNN <- substr(dat_l$variable, 1, 1)
 dat_l$CNN[dat_l$CNN %in% c("a", "b")] <- "Within block"
@@ -58,11 +58,14 @@ dat_l$boxes[dat_l$variable == "b512"] <- "b"
 dat_l$boxes <- factor(dat_l$boxes, levels = c("256", "512", "1024", "a", "b"))
 
 #############################################
-##### t-tests
+##### two factor repeated measures ANOVA
 #############################################
 anova <- aov(value ~ CNN * Tilesize + Error(Class/(CNN*Tilesize)), data = dat_l)
 summary(anova)
 
+#############################################
+##### t-tests
+#############################################
 models <- names(dat)[-c(1, 11, 12)]
 t_tests_p <- matrix(nrow = length(models) - 1, ncol = length(models) - 1)
 t_tests_t <- matrix(nrow = length(models) - 1, ncol = length(models) - 1)
