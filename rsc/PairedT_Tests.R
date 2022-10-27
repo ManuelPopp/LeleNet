@@ -1,7 +1,21 @@
 #############################################
 ##### Load packages, set theme
 #############################################
-packages <- c("readxl", "lme4", "lmerTest", "emmeans", "dplyr", "reshape2")
+if(!require("BiocManager", character.only = TRUE)){
+  install.packages("BiocManager")
+}
+
+# in case the following fails due to issues with nloptr,
+# run in terminal: sudo apt-get install libnlopt-dev
+packages <- c("lme4", "lmerTest", "emmeans")
+for(i in 1:NROW(packages)){
+  if(!require(packages[i], character.only = TRUE)){
+    BiocManager::install(packages[i])
+    library(packages[i], character.only = TRUE)
+  }
+}
+
+packages <- c("readxl", "dplyr", "reshape2")
 for(i in 1:NROW(packages)){
   if(!require(packages[i], character.only = TRUE)){
     install.packages(packages[i])
