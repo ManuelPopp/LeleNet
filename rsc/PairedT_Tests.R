@@ -7,7 +7,7 @@ if(!require("BiocManager", character.only = TRUE)){
 
 # in case the following fails due to issues with nloptr,
 # run in terminal: sudo apt-get install libnlopt-dev
-packages <- c("lme4", "lmerTest", "emmeans")
+packages <- c("lme4", "lmerTest", "emmeans", "pbkrtest")
 for(i in 1:NROW(packages)){
   if(!require(packages[i], character.only = TRUE)){
     BiocManager::install(packages[i])
@@ -15,7 +15,7 @@ for(i in 1:NROW(packages)){
   }
 }
 
-packages <- c("readxl", "dplyr", "reshape2")
+packages <- c("readxl", "dplyr", "reshape2", "ggplot2")
 for(i in 1:NROW(packages)){
   if(!require(packages[i], character.only = TRUE)){
     install.packages(packages[i])
