@@ -1,7 +1,7 @@
 #############################################
 ##### Load packages, set theme
 #############################################
-packages <- c("readxl", "ggplot2", "dplyr", "reshape2")
+packages <- c("readxl", "lme4", "lmerTest", "emmeans", "dplyr", "reshape2")
 for(i in 1:NROW(packages)){
   if(!require(packages[i], character.only = TRUE)){
     install.packages(packages[i])
@@ -62,6 +62,13 @@ dat_l$boxes <- factor(dat_l$boxes, levels = c("256", "512", "1024", "a", "b"))
 #############################################
 anova <- aov(value ~ CNN * Tilesize + Error(Class/(CNN*Tilesize)), data = dat_l)
 summary(anova)
+
+#############################################
+##### linear mixed-effects model
+#############################################
+mod <- lme4::lmer(value ~ CNN*Tilesize + (1 | Class), data = dat_l)
+means <- emmeans::emmeans(mod, ~ c(CNN, Tilesize))
+pairs(means)
 
 #############################################
 ##### t-tests
