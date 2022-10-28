@@ -1,0 +1,13 @@
+ CNN         Tilesize emmean     SE   df lower.CL upper.CL
+ U-Net       256       0.503 0.0555 20.1    0.387    0.619
+ FC-DenseNet 256       0.560 0.0555 20.1    0.444    0.676
+ DeepLabv3+  256       0.569 0.0555 20.1    0.453    0.685
+ U-Net       512       0.496 0.0555 20.1    0.380    0.611
+ FC-DenseNet 512       0.542 0.0555 20.1    0.426    0.657
+ DeepLabv3+  512       0.610 0.0555 20.1    0.494    0.726
+ U-Net       1024      0.500 0.0555 20.1    0.384    0.615
+ FC-DenseNet 1024      0.276 0.0555 20.1    0.160    0.392
+ DeepLabv3+  1024      0.571 0.0555 20.1    0.456    0.687
+
+Degrees-of-freedom method: kenward-roger 
+Confidence level used: 0.95 
