@@ -82,10 +82,18 @@ summary(anova)
 #############################################
 mod <- lme4::lmer(value ~ CNN*Tilesize + (1 | Class), data = dat_l)
 means <- emmeans::emmeans(mod, ~ c(CNN, Tilesize))
+
+# save output to .txt files
+sink(file.path(excel_path, "Means.txt"))
+means
+sink()
+
+sink(file.path(excel_path, "Pairs.txt"))
 pairs(means)
+sink()
 
 #############################################
-##### t-tests
+##### Paired t-tests
 #############################################
 models <- names(dat)[-c(1, 11, 12)]
 t_tests_p <- matrix(nrow = length(models) - 1, ncol = length(models) - 1)
@@ -99,8 +107,8 @@ colnames(t_tests_t) <- models[-9]
 for(i in 1:(nrow(t_tests) - 1)){
   for(j in 1:(ncol(t_tests) - 1)){
     t_test <- t.test(dat[, which(names(dat) == row.names(t_tests_p)[i])],
-                            dat[, which(names(dat) == colnames(t_tests_p)[j])],
-                            paired = TRUE)
+                     dat[, which(names(dat) == colnames(t_tests_p)[j])],
+                     paired = TRUE)
     if(i >= j){
       t_tests_p[i, j] <- signif(t_test$p.value, 3)
       t_tests_t[i, j] <- signif(t_test$statistic, 3)
