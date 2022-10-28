@@ -104,8 +104,8 @@ colnames(t_tests_p) <- models[-9]
 row.names(t_tests_t) <- models[-1]
 colnames(t_tests_t) <- models[-9]
 
-for(i in 1:(nrow(t_tests) - 1)){
-  for(j in 1:(ncol(t_tests) - 1)){
+for(i in 1:(nrow(t_tests_p))){
+  for(j in 1:(ncol(t_tests_p))){
     t_test <- t.test(dat[, which(names(dat) == row.names(t_tests_p)[i])],
                      dat[, which(names(dat) == colnames(t_tests_p)[j])],
                      paired = TRUE)
