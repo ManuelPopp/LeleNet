@@ -93,7 +93,7 @@ pairs(means)
 sink()
 
 #############################################
-##### Paired t-tests
+##### Pairwise comparison
 #############################################
 models <- names(dat)[-c(1, 11, 12)]
 t_tests_p <- matrix(nrow = length(models) - 1, ncol = length(models) - 1)
@@ -104,20 +104,63 @@ colnames(t_tests_p) <- models[-9]
 row.names(t_tests_t) <- models[-1]
 colnames(t_tests_t) <- models[-9]
 
+shapiro_mat <- t_tests_p
+
 for(i in 1:(nrow(t_tests_p))){
   for(j in 1:(ncol(t_tests_p))){
     t_test <- t.test(dat[, which(names(dat) == row.names(t_tests_p)[i])],
                      dat[, which(names(dat) == colnames(t_tests_p)[j])],
                      paired = TRUE)
+    
+    Difference = dat[, which(names(dat) == row.names(t_tests_p)[i])] -
+      dat[, which(names(dat) == colnames(t_tests_p)[j])]
+    
+    hist(Difference,   
+         col = "gray", 
+         main = "Histogram of differences",
+         xlab = "Difference")
+    
     if(i >= j){
       t_tests_p[i, j] <- signif(t_test$p.value, 3)
       t_tests_t[i, j] <- signif(t_test$statistic, 3)
+      
+      shapwilk <- shapiro.test(Difference)
+      shapiro_mat[i, j] <- round(shapwilk$p.value, 2)
+      
     }else{
       t_tests_p[i, j] <- NA
       t_tests_t[i, j] <- NA
+      shapiro_mat[i, j] <- NA
+    }
+  }
+}
+
+w_tests_p <- matrix(nrow = length(models) - 1, ncol = length(models) - 1)
+w_tests_t <- matrix(nrow = length(models) - 1, ncol = length(models) - 1)
+
+row.names(w_tests_p) <- models[-1]
+colnames(w_tests_p) <- models[-9]
+row.names(w_tests_t) <- models[-1]
+colnames(w_tests_t) <- models[-9]
+
+for(i in 1:(nrow(w_tests_p))){
+  for(j in 1:(ncol(w_tests_p))){
+    w_test <- wilcox.test(dat[, which(names(dat) == row.names(w_tests_p)[i])],
+                     dat[, which(names(dat) == colnames(w_tests_p)[j])],
+                     paired = TRUE, alternative = "two.sided")
+    
+    if(i >= j){
+      w_tests_p[i, j] <- signif(w_test$p.value, 3)
+      w_tests_t[i, j] <- signif(w_test$statistic, 3)
+      
+    }else{
+      w_tests_p[i, j] <- NA
+      w_tests_t[i, j] <- NA
     }
   }
 }
 
 write.table(t_tests_p, file.path(excel_path, "Paired_t_tests_p.csv"), sep = " & ", eol = "\\\\\n")
 write.table(t_tests_t, file.path(excel_path, "Paired_t_tests_t.csv"), sep = " & ", eol = "\\\\\n")
+write.table(w_tests_p, file.path(excel_path, "Wilcox_tests_p.csv"), sep = " & ", eol = "\\\\\n")
+write.table(w_tests_t, file.path(excel_path, "Wilcox_tests_t.csv"), sep = " & ", eol = "\\\\\n")
