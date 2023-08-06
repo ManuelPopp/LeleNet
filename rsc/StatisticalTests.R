@@ -72,27 +72,6 @@ dat_l$boxes[dat_l$variable == "b512"] <- "b"
 dat_l$boxes <- factor(dat_l$boxes, levels = c("256", "512", "1024", "a", "b"))
 
 #############################################
-##### two factor repeated measures ANOVA
-#############################################
-anova <- aov(value ~ CNN * Tilesize + Error(Class/(CNN*Tilesize)), data = dat_l)
-summary(anova)
-
-#############################################
-##### linear mixed-effects model
-#############################################
-mod <- lme4::lmer(value ~ CNN*Tilesize + (1 | Class), data = dat_l)
-means <- emmeans::emmeans(mod, ~ c(CNN, Tilesize))
-
-# save output to .txt files
-sink(file.path(excel_path, "Means.txt"))
-means
-sink()
-
-sink(file.path(excel_path, "Pairs.txt"))
-pairs(means)
-sink()
-
-#############################################
 ##### Pairwise comparison
 #############################################
 models <- names(dat)[-c(1, 11, 12)]
