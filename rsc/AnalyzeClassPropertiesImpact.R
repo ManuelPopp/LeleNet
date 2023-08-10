@@ -83,6 +83,7 @@ if(!finished){
     group_by(factor(class)) %>%
     summarise(mean_pa = mean(pa), total_ca = sum(ca), mean_cm = mean(cm))
   save(lsm_df, file = file.path(r_path, "lsm_df.Rdata"))
+  
 }else{
   load(file.path(r_path, "lsm_df.Rdata"))
   summary_lsm <- lsm_df %>%
@@ -113,16 +114,20 @@ if(!finished){
     lsm <- data.frame(class = patch_areas[, 1], pa = patch_areas[, 2],
                       ca = class_areas[, 2], cm = circle_mean[, 2],
                       omk = rep(plot, nrow(patch_areas)))
+    
     if(!exists("lsm_df_tst")){
       lsm_df_tst <- lsm
+    
     }else{
       lsm_df_tst <- rbind(lsm_df_tst, lsm)
     }
   }
+  
   summary_lsm_tst <- lsm_df %>%
     group_by(factor(class)) %>%
     summarise(mean_pa = mean(pa), total_ca = sum(ca), mean_cm = mean(cm))
   save(lsm_df_tst, file = file.path(r_path, "lsm_df_tst.Rdata"))
+  
 }else{
   load(file.path(r_path, "lsm_df_tst.Rdata"))
   summary_lsm_tst <- lsm_df_tst %>%
@@ -132,7 +137,7 @@ if(!finished){
 names(summary_lsm_tst) <- c("Class", "mean_pa_tst", "total_ca_tst", "mean_cm_tst")
 #########################################################################
 
-class_range <- c(1:16)
+class_range <- c(2:16)
 hist(summary_lsm$mean_pa[class_range])
 hist(summary_lsm$total_ca[class_range])
 hist(summary_lsm$mean_cm[class_range])
@@ -164,19 +169,65 @@ metric_names <- names(summary_lsm)[-1]
 names(l) <- c("Class", paste0(metric_names, "_train"), paste0(metric_names, "_test"))
 correlations_p <- data.frame(Model = names(d[, -1]))
 correlations_b <- data.frame(Model = names(d[, -1]))
+
+outlier_removed = list()
+remove_outliers = FALSE
+
+spearmans_rho <- matrix(nrow = ncol(d) - 1, ncol = ncol(l) - 1)
+colnames(spearmans_rho) <- names(l)[-1]
+rownames(spearmans_rho) <- names(d)[-1]
+
+spearman_p <- spearmans_rho
+
 for(metric in names(l[, -1])){
   cor_p <- c()
   cor_b <- c()
+  rcor_b <- c()
   for(model in names(d[, -1])){
     F1 <- d[, model]
     lmetr <- l[, metric]
     lin_cor <- lm(F1 ~ lmetr)
-    p <- round(summary(lin_cor)$coefficients[2, 4], 2)
+    p <- summary(lin_cor)$coefficients[2, 4]
+    rlin_cor <- rlm(F1 ~ lmetr)
+    spearman <- cor.test(lmetr, F1, method = "spearman")
+    
+    spearmans_rho[model, metric] <- spearman$estimate
+    spearman_p[model, metric] <- spearman$p.value
+    
+    outliers <- which(hatvalues(lin_cor) > (mean(hatvalues(lin_cor)) + 2 * sd(hatvalues(lin_cor))))
+    
+    if(length(outliers) > 0 & remove_outliers){
+        lin_cor <- lm(F1[-outliers] ~ lmetr[-outliers])
+        outlier_removed[[length(outlier_removed) + 1]] <- paste(model, metric, "n = ", length(outliers))
+    }
+    
+    # Test for heteroskedasticity using the Breusch Pagan test (homoscedasticity if p > 0.05)
+    bpt <- ols_test_breusch_pagan(lin_cor)
+    bpt.p <- round(summary(lin_cor)$coefficients[2, 4], 2)
+    
+    if(bpt.p < 0.05){
+        print(paste0("Heteroscedasticity detected for ", model, " and ", metric, "."))
+    }
+    
+    # Test normality of the residuals
+    shapwilk <- shapiro.test(lin_cor$residuals)
+    sw.p <- shapwilk$p.value
+    
+    if(sw.p < 0.05){
+        print(paste0("Non-normality detected for ", model, " and ", metric, "."))
+    }
+    
+    # Test for high-leverage values
+    ols_plot_resid_stud(lin_cor) 
+    ols_plot_resid_lev(lin_cor)
+    
+    # Plot to check for non-linear correlations
     plot(F1 ~ lmetr, main = paste0(model, ", ", metric, ", p = ", p))
     abline(a = lin_cor$coefficients[1], b = lin_cor$coefficients[2], col = "red")
     summary(lin_cor)
     cor_p <- c(cor_p, p)
     cor_b <- c(cor_b, lin_cor$coefficients[2])
+    #rcor_b <- c(rcor_b, rlin_cor$coefficients[2])
   }
   correlations_p[, metric] <- cor_p
   correlations_b[, metric] <- cor_b
@@ -193,14 +244,17 @@ sigfill <- function(x, sigfigs = 3){
 }
 
 full_table <- data.frame(Model = correlations_p$Model)
+
 for(j in 2:ncol(correlations_p)){
   full_table[, j] <- paste(
     sigfill(correlations_b[, j], 3), sigfill(correlations_p[, j], 3), sep = " & "
   )
 }
+
 full_table[, 1] <- c(rep(c(256, 512, 1024), 3), 512, 512)
 full_table <- cbind(c("U-Net", " ", " ", "FC-DenseNet", " ", " ", "DeepLabv3+", " ", " ", "DL 2021", "DL 2022"),
                     full_table)
+
 names(full_table) <- seq(1, ncol(full_table))
 
 ## Train ds
@@ -239,7 +293,7 @@ writeLines(paste(c("\\toprule",
 ## create combined table
 writeLines(
   paste(c("\\begin{table}[hbtp]\n
-     \\caption[Linear models relating F1-Score and class properties]{Slope and \textit{p}-value of linear models relating F1-Score and class properties as expressed through the metrics mean patch area (in ha), total class area (in ha) and compactness of patches (mean smallest circumscribing circle for patches of the class). Degrees of freedom = 14.}\n
+     \\caption[Correlations between F1-Score and class properties]{Spearman's slope and \\textit{p}-value of linear models relating F1-Score and tree class properties as expressed through the metrics mean patch area (in ha), total class area (in ha) and compactness of patches (mean smallest circumscribing circle for patches of the class). Degrees of freedom = 14.}\n
      \\label{tab:LSM_full}\n
     \\begin{subtable}[h]{\\textwidth}\n
     \\caption{Training data}\n
@@ -290,133 +344,3 @@ write.table(correlations_b, file = file.path(excel_path, "LSM_Impact.tex"),
            col.names = c("{Model}", "{Mean patch area}", "{Class area}", "{Compactness}",
                          "{Mean patch area}", "{Class area}", "{Compactness}"),
            row.names = FALSE, sep = " & ", eol = "\\\\\n", quote = FALSE)
-
-# ANOVA
-dl <- melt(dat, id.vars = "Species")
-dl$value <- as.numeric(dl$value)
-dl$Network <- factor(c("U-Net", "FC-DenseNet",
-                "DeepLabv3+", "Other")[as.numeric(
-                  factor(
-                    substr(
-                      dl$variable, 1, 1), levels = c("U", "F", "D", "S"))
-                  )], levels = c("U-Net", "FC-DenseNet",
-                                 "DeepLabv3+", "Other"))
-dl$Tilesize <- sub("\\w", "", dl$variable)
-longdat <- dl[which(dl$Network %in% c("U-Net", "FC-DenseNet", "DeepLabv3+")),]
-
-ANOVA <- aov(value ~ Network * Tilesize, data = longdat)
-summary(ANOVA)
-# no interaction
-ANOVA <- aov(value ~ Network + Tilesize, data = longdat)
-ANOVA_SUMMARY <- summary(ANOVA)[[1]]
-AOV_TABLE <- ANOVA_SUMMARY[c(1, 2), c(1, 4, 5)]
-
-test_assumptions <- lm(value ~ Network * Tilesize, data = longdat)
-plot(test_assumptions)
-shap0 <- rstatix::shapiro_test(residuals(test_assumptions))
-if(shap0$p.value > 0.05){
-  print("Residuals normally distributed.")
-}else{
-  print("Assumption of normal distribution violated.")
-}
-
-shap1 <- longdat %>%
-  group_by(variable) %>%
-  summarise(shapiro = rstatix::shapiro_test(value))
-normal <- which(shap1$shapiro$p.value > 0.05)
-if(length(normal) == length(shap1$shapiro$p.value)){
-  print("Values within groups normally distributed.")
-}else{
-  print("Assumption of normal distribution violated.")
-}
-
-lev <- longdat %>% rstatix::levene_test(value ~ variable)
-if(lev$p > 0.05){
-  print("Variances homogeneous.")
-}else{
-  print("Assumption of homogeneity of variances violated.")
-}
-
-hsd <- longdat %>% rstatix::tukey_hsd(value ~ Network * Tilesize)
-hsd
-
-# Write data to LaTeX table
-#lines <- "\\begin{table}[htbp]\n\\caption[ANOVA]{ANOVA results}
-#\\begin{tabular}[lccc]
-#\\toprule
-#Variable & df & F-value & \\textit{p}-value\\\\
-#\\midrule"
-#sink(file.path(dir_dropbox, "tab", "ANOVA.tex"))
-#cat(lines)
-#sink()
-long_ttest <- longdat[(longdat$variable %in% levels(longdat$variable)[1:9]), c("Species", "variable", "value")]
-long_ttest <- long_ttest[!is.na(long_ttest$value),]
-long_ttest$variable <- factor(long_ttest$variable, levels = unique(long_ttest$variable))
-
-t_test <- long_ttest %>%
-  pairwise_t_test(
-    value ~ variable, paired = TRUE, 
-    p.adjust.method = "bonferroni"
-  ) %>%
-  select(-df, -statistic, -p)
-t_test
-
-t_test_df <- as.data.frame(t_test)[, c(2, 3, 6)]
-t_test_matr <- matrix(nrow = length(levels(long_ttest$variable)) - 1,
-                      ncol = length(levels(long_ttest$variable)))
-row.names(t_test_matr) <- levels(long_ttest$variable)[-1]
-colnames(t_test_matr) <- levels(long_ttest$variable)
-for(i in 1:nrow(t_test_matr)){
-  for(j in 1:ncol(t_test_matr)){
-    groups <- c(row.names(t_test_matr)[i], colnames(t_test_matr)[j])
-    if(length(unique(groups)) == 2){
-      t_test_matr[i, j] <- t_test_df$p.adj[which(t_test_df$group1 %in% groups &
-                                                   t_test_df$group2 %in% groups)]
-    }
-  }
-}
-
-write.csv2(t_test_matr, file = file.path(excel_path, "Pairwise_t_tests.csv"))
-
-# output summary lsm
-lsm <- summary_lsm
-lsm$mean_pa <- summary_lsm$mean_pa / max(summary_lsm$mean_pa)
-lsm$total_ca <- summary_lsm$total_ca / max(summary_lsm$total_ca)
-lsm$percent_ca <- summary_lsm$total_ca / sum(summary_lsm$total_ca)
-lsm$mean_cm <- summary_lsm$mean_cm / max(summary_lsm$mean_cm)
-classnames <- c("Other woody vegetation",
-  expression(italic("Burkea africana")),
-  expression(italic("Combretum apiculatum")),
-  expression(italic("Combretum molle")),
-  expression(italic("Combretum zeyheri")),
-  expression(italic("Commiphora mollis")),
-  expression(italic("Dichrostachys cinerea")),
-  expression(italic("Diplorhynchus condylocarpon")),
-  expression(italic("Elephantorrhiza burkei")),
-  expression(italic("Grewia")~"spec."),
-  expression(italic("Lannea discolor")),
-  expression(italic("Mundulea sericea")),
-  expression(italic("Ozoroa paniculosa")),
-  expression(italic("Pseudolachnostylis maprouneifolia")),
-  expression(italic("Pterocarpus rotundifolius")),
-  expression(italic("Terminalia sericea")),
-  "Bare ground")
-names(lsm)[1] <- "Class"
-lsm_l <- rbind(setNames(cbind(lsm[, c(1, 2)], rep("Mean patch area", nrow(lsm))),
-                        c("Class", "Value", "Variable")),
-               setNames(cbind(lsm[, c(1, 4)], rep("Mean compactness", nrow(lsm))),
-                        c("Class", "Value", "Variable")),
-               setNames(cbind(lsm[, c(1, 5)], rep("Fractional cover", nrow(lsm))),
-                              c("Class", "Value", "Variable")))
-gg <- ggplot(data = lsm_l, aes(x = Class, y = Value, colour = Variable, shape = Variable)) +
-  geom_point() +
-  scale_x_discrete(labels = classnames) +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
-        axis.title.x = element_blank(),
-        axis.title.y = element_blank(),
-        legend.position = "None") +
-  scale_color_manual(name = "Variable", values = cols)
-
-pdf(file.path(dir_dropbox, "fig", "Class_LSM.pdf"), width = w, height = h * 1.5)
-gg
-dev.off()
