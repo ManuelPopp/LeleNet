@@ -1,5 +1,5 @@
 # LeleNet
-This repo was set up to save and share code for semantic segmentation in the LELE project as described in "Testing the suitability of consumer-grade UAV imagery for semantic segmentation of savanna vegetation".
+This repo was set up to share code for semantic segmentation in the LELE project as described in "Testing the suitability of consumer-grade UAV imagery for semantic segmentation of savanna vegetation".
 Requirements are—amongst others—installation of:
 * [TensorFlow](https://www.tensorflow.org/) (CNN training)
 * [ArcGIS Pro](https://pro.arcgis.com/) (reference data creation)
