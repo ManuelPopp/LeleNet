@@ -9,4 +9,4 @@ since main workflows are based on this software. Additional requirements are lis
 
 ## Extensive information can be found in the [LeleNet Wiki](https://github.com/ManuelPopp/LeleNet/wiki).
 
-<sup>1</sup>Popp, M.R., Kalwij, J.M. Consumer-grade UAV imagery facilitates semantic segmentation of species-rich savanna tree layers. Sci Rep 13, 13892 (2023). [http://dx.doi.org/10.1038/s41598-023-40989-7](http://dx.doi.org/10.1038/s41598-023-40989-7)
+<sup>1</sup>Popp, M.R., Kalwij, J.M. Consumer-grade UAV imagery facilitates semantic segmentation of species-rich savanna tree layers. _Sci Rep_ **13**, 13892 (2023). [http://dx.doi.org/10.1038/s41598-023-40989-7](http://dx.doi.org/10.1038/s41598-023-40989-7)
